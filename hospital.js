@@ -12,6 +12,7 @@ console.log('🏥 MediCare Hospital started');
 let patients = [];
 let doctors = [];
 let appts = [];
+let prescriptions = [];
 let currentUser = null;
 let currentUserRole = null;
 let authMode = 'signin';
@@ -90,7 +91,6 @@ async function updateUserUI() {
   const welcome = document.getElementById('welcomeMsg');
 
   if (currentUser) {
-    // Pata jina na role
     const { data } = await db.from('user_profiles')
       .select('full_name, role')
       .eq('id', currentUser.id)
@@ -104,7 +104,6 @@ async function updateUserUI() {
     roleEl.textContent = (currentUserRole || 'user').toUpperCase();
     if (welcome) welcome.textContent = 'Karibu, ' + fullName + ' (' + (currentUserRole || 'user') + ')';
     
-    // Pakia data
     loadAll();
   } else {
     currentUserRole = null;
@@ -113,22 +112,21 @@ async function updateUserUI() {
     roleEl.textContent = '—';
     if (welcome) welcome.textContent = 'Karibu MediCare Hospital';
     
-    // Futa data
     patients = [];
     doctors = [];
     appts = [];
+    prescriptions = [];
     renderPatients();
     renderDoctors();
     renderAppts();
     renderRecent();
+    renderPrescriptions();
     
-    // Reset stats
     ['sPatients', 'sDoctors', 'sAppts', 'sPending'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.textContent = '—';
     });
     
-    // Fungua Auth modal
     setTimeout(() => openAuth(), 300);
   }
 }
@@ -258,6 +256,10 @@ async function loadAll() {
     appts = ad || [];
     renderAppts();
     renderRecent();
+
+    const { data: rxd } = await db.from('prescriptions').select('*').order('prescribed_at', { ascending: false });
+    prescriptions = rxd || [];
+    renderPrescriptions();
 
     console.log('✅ Data loaded');
   } catch (err) {
@@ -424,6 +426,54 @@ function renderRecent() {
         <td>${esc(dr ? dr.full_name : '—')}</td>
         <td>${fmt(a.appointment_date)}</td>
         <td><span class="badge b-${a.status}">${a.status}</span></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ============================================
+// RENDER PRESCRIPTIONS
+// ============================================
+function renderPrescriptions() {
+  const tb = document.getElementById('tPrescriptions');
+  if (!tb) return;
+
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="8" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
+
+  const q = (document.getElementById('searchRx').value || '').toLowerCase().trim();
+  const list = prescriptions.filter(rx => {
+    if (!q) return true;
+    const pt = patients.find(p => p.id === rx.patient_id);
+    const ptName = pt ? pt.full_name.toLowerCase() : '';
+    const medName = (rx.medicine_name || '').toLowerCase();
+    return ptName.includes(q) || medName.includes(q);
+  });
+
+  document.getElementById('resultCountRx').textContent = `${list.length} of ${prescriptions.length} prescriptions`;
+
+  if (list.length === 0) {
+    tb.innerHTML = '<tr><td colspan="8" class="empty">No prescriptions found</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = list.map(rx => {
+    const pt = patients.find(p => p.id === rx.patient_id);
+    const dr = doctors.find(d => d.id === rx.doctor_id);
+    return `
+      <tr>
+        <td><strong>${esc(pt ? pt.full_name : '—')}</strong></td>
+        <td>${esc(dr ? dr.full_name : '—')}</td>
+        <td><strong style="color:#0284c7;">${esc(rx.medicine_name)}</strong></td>
+        <td>${esc(rx.dosage || '—')}</td>
+        <td>${esc(rx.frequency || '—')}</td>
+        <td>${esc(rx.duration || '—')}</td>
+        <td>${fmtDate(rx.prescribed_at || rx.created_at)}</td>
+        <td>
+          <button class="btn-icon" onclick="delPrescription(${rx.id})" title="Delete"><i class="fas fa-trash"></i></button>
+        </td>
       </tr>
     `;
   }).join('');
@@ -637,6 +687,65 @@ async function delAppt(id) {
   const { error } = await db.from('appointments').delete().eq('id', id);
   if (error) return toast(error.message, 'error');
   toast('Appointment deleted');
+  loadAll();
+}
+
+// ============================================
+// PRESCRIPTION CRUD
+// ============================================
+async function openPrescription() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  document.getElementById('fPrescription').reset();
+  document.getElementById('rx_id').value = '';
+  
+  const ps = document.getElementById('rx_patient');
+  const ds = document.getElementById('rx_doctor');
+  
+  ps.innerHTML = '<option value="">— Select patient —</option>' + 
+    patients.map(p => `<option value="${p.id}">${padId(p.id)} - ${esc(p.full_name)}</option>`).join('');
+  
+  ds.innerHTML = '<option value="">— Select doctor —</option>' + 
+    doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('');
+  
+  document.getElementById('mPrescriptionTitle').textContent = 'New Prescription';
+  openM('mPrescription');
+}
+
+async function savePrescription() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  
+  const data = {
+    patient_id: parseInt(document.getElementById('rx_patient').value),
+    doctor_id: parseInt(document.getElementById('rx_doctor').value),
+    medicine_name: document.getElementById('rx_medicine').value.trim(),
+    dosage: document.getElementById('rx_dosage').value.trim(),
+    frequency: document.getElementById('rx_frequency').value.trim() || null,
+    duration: document.getElementById('rx_duration').value.trim() || null,
+    instructions: document.getElementById('rx_instructions').value.trim() || null
+  };
+  
+  if (!data.patient_id || !data.doctor_id || !data.medicine_name || !data.dosage) {
+    toast('Jaza sehemu zote zinazohitajika', 'error');
+    return;
+  }
+  
+  try {
+    const { error } = await db.from('prescriptions').insert([data]);
+    if (error) throw error;
+    toast('✅ Prescription imeongezwa');
+    closeM('mPrescription');
+    loadAll();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function delPrescription(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  if (!confirm('Delete this prescription?')) return;
+  const { error } = await db.from('prescriptions').delete().eq('id', id);
+  if (error) return toast(error.message, 'error');
+  toast('Prescription deleted');
   loadAll();
 }
 
