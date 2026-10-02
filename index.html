@@ -38,16 +38,124 @@
     }
 
     /* LAYOUT */
-    .layout { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; }
+    .app {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    /* TOP BAR */
+    .top-bar {
+      grid-column: 1 / -1;
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 0.85rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+
+    .top-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: var(--gray-500);
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .top-bar-left i { color: var(--primary); font-size: 1.1rem; }
+
+    .user-area { position: relative; }
+
+    .user-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 1rem;
+      border: 1.5px solid var(--gray-200);
+      background: white;
+      border-radius: 12px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: var(--gray-900);
+    }
+
+    .user-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .user-btn i { font-size: 1.2rem; color: var(--primary); }
+
+    .user-menu {
+      position: absolute;
+      top: 55px;
+      right: 0;
+      background: white;
+      border: 1.5px solid var(--gray-200);
+      border-radius: 14px;
+      padding: 0.5rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      min-width: 240px;
+      display: none;
+      z-index: 100;
+    }
+
+    .user-menu.show { display: block; animation: fadeIn 0.15s; }
+
+    .user-menu-email {
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--gray-900);
+      border-bottom: 1px solid var(--gray-200);
+      word-break: break-all;
+    }
+
+    .user-menu-role {
+      padding: 0.5rem 1rem;
+      font-size: 0.72rem;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--gray-200);
+      font-weight: 600;
+    }
+
+    .user-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: all 0.15s;
+      color: var(--gray-900);
+      font-weight: 500;
+    }
+
+    .user-menu-item:hover { background: var(--gray-100); }
+    .user-menu-item i { color: var(--primary); width: 20px; }
 
     /* SIDEBAR */
     .side {
       background: var(--secondary);
       color: white;
       padding: 1.5rem 1rem;
+      height: calc(100vh - 60px);
       position: sticky;
-      top: 0;
-      height: 100vh;
+      top: 60px;
       overflow-y: auto;
     }
 
@@ -311,6 +419,21 @@
     .b-completed { background: #d1fae5; color: #065f46; }
     .b-cancelled { background: #fee2e2; color: #991b1b; }
 
+    .role-badge {
+      display: inline-block;
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .role-admin { background: #fee2e2; color: #991b1b; }
+    .role-doctor { background: #dbeafe; color: #1e40af; }
+    .role-nurse { background: #d1fae5; color: #065f46; }
+    .role-receptionist { background: #fef3c7; color: #92400e; }
+
     /* MODAL */
     .modal-bg {
       position: fixed;
@@ -367,6 +490,34 @@
     }
 
     .close-x:hover { background: var(--gray-100); color: var(--gray-900); }
+
+    /* AUTH TABS */
+    .auth-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1.5px solid var(--gray-200);
+    }
+
+    .auth-tab {
+      flex: 1;
+      padding: 0.75rem;
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      color: var(--gray-500);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1.5px;
+      transition: all 0.15s;
+    }
+
+    .auth-tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
 
     /* FORM */
     .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
@@ -485,13 +636,31 @@
     .detail-row strong { min-width: 150px; color: var(--gray-500); font-weight: 600; }
     .detail-row span { color: var(--gray-900); }
 
+    /* LOADING */
+    .loading {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--gray-400);
+      font-size: 0.9rem;
+    }
+
+    .loading i {
+      font-size: 1.5rem;
+      animation: spin 1s linear infinite;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     /* RESPONSIVE */
     @media (max-width: 900px) {
-      .layout { grid-template-columns: 1fr; }
-      .side { position: relative; height: auto; }
+      .app { grid-template-columns: 1fr; }
+      .side { position: relative; height: auto; top: 0; }
       .main { padding: 1.5rem; }
       .fgrid { grid-template-columns: 1fr; }
       .fg.full { grid-column: span 1; }
+      .top-bar { padding: 0.7rem 1rem; }
     }
 
     @media (max-width: 600px) {
@@ -504,14 +673,35 @@
 
     /* PRINT */
     @media print {
-      .side, .btn, .search, .filter-bar, .nav-btn { display: none !important; }
+      .side, .btn, .search, .filter-bar, .nav-btn, .top-bar { display: none !important; }
       .main { padding: 1rem; }
       .card { border: 1px solid #ccc; box-shadow: none; }
     }
   </style>
 </head>
 <body>
-  <div class="layout">
+  <div class="app">
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <i class="fas fa-shield-halved"></i>
+        <span id="welcomeMsg">Karibu MediCare Hospital</span>
+      </div>
+      <div class="user-area">
+        <button class="user-btn" id="userBtn" onclick="handleUserClick()">
+          <i class="fas fa-user-circle"></i>
+          <span id="userLabel">Sign In</span>
+        </button>
+        <div class="user-menu" id="userMenu">
+          <div class="user-menu-email" id="userMenuEmail">—</div>
+          <div class="user-menu-role" id="userMenuRole">—</div>
+          <button class="user-menu-item" onclick="signOut()">
+            <i class="fas fa-sign-out-alt"></i> Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- SIDEBAR -->
     <aside class="side">
       <div class="logo">
@@ -660,6 +850,54 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- MODAL: AUTH -->
+  <div class="modal-bg" id="mAuth">
+    <div class="modal" style="max-width:450px;">
+      <div class="modal-head">
+        <h3 id="authTitle">Sign In</h3>
+        <button class="close-x" onclick="closeM('mAuth')">&times;</button>
+      </div>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabSignIn" onclick="switchAuthTab('signin')">Sign In</button>
+        <button class="auth-tab" id="tabSignUp" onclick="switchAuthTab('signup')">Sign Up</button>
+      </div>
+
+      <form id="fAuth">
+        <div class="fgrid">
+          <div class="fg full" id="signupNameField" style="display:none;">
+            <label>Full Name *</label>
+            <input type="text" id="a_name">
+          </div>
+          <div class="fg full">
+            <label>Email *</label>
+            <input type="email" id="a_email" required>
+          </div>
+          <div class="fg full">
+            <label>Password *</label>
+            <input type="password" id="a_password" placeholder="At least 6 characters" required>
+          </div>
+          <div class="fg full" id="signupRoleField" style="display:none;">
+            <label>Role *</label>
+            <select id="a_role">
+              <option value="receptionist">Receptionist</option>
+              <option value="nurse">Nurse</option>
+              <option value="doctor">Doctor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+      </form>
+
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mAuth')">Cancel</button>
+        <button class="btn btn-primary" id="authSubmitBtn" onclick="submitAuth()">
+          <i class="fas fa-sign-in-alt"></i> Sign In
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- MODAL: PATIENT -->
