@@ -37,7 +37,6 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* LAYOUT */
     .app {
       display: grid;
       grid-template-columns: 260px 1fr;
@@ -419,21 +418,6 @@
     .b-completed { background: #d1fae5; color: #065f46; }
     .b-cancelled { background: #fee2e2; color: #991b1b; }
 
-    .role-badge {
-      display: inline-block;
-      padding: 0.25rem 0.6rem;
-      border-radius: 6px;
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .role-admin { background: #fee2e2; color: #991b1b; }
-    .role-doctor { background: #dbeafe; color: #1e40af; }
-    .role-nurse { background: #d1fae5; color: #065f46; }
-    .role-receptionist { background: #fef3c7; color: #92400e; }
-
     /* MODAL */
     .modal-bg {
       position: fixed;
@@ -713,6 +697,7 @@
       <button class="nav-btn" data-page="patients"><i class="fas fa-users"></i> Patients</button>
       <button class="nav-btn" data-page="doctors"><i class="fas fa-user-md"></i> Doctors</button>
       <button class="nav-btn" data-page="appointments"><i class="fas fa-calendar-check"></i> Appointments</button>
+      <button class="nav-btn" data-page="prescriptions"><i class="fas fa-prescription"></i> Prescriptions</button>
     </aside>
 
     <main class="main">
@@ -845,6 +830,42 @@
             <table>
               <thead><tr><th>Patient</th><th>Doctor</th><th>Date</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody id="tAppts"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- PRESCRIPTIONS -->
+      <section class="page" id="page-prescriptions">
+        <div class="page-head">
+          <div>
+            <h2>Prescriptions</h2>
+            <p class="sub">Manage patient prescriptions</p>
+          </div>
+          <button class="btn btn-primary" onclick="openPrescription()"><i class="fas fa-plus"></i> New Prescription</button>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <input type="text" class="search" id="searchRx" placeholder="Search by patient, medicine..." oninput="renderPrescriptions()">
+            <span id="resultCountRx" style="margin-left:auto; font-size:0.85rem; color:var(--gray-500); font-weight:600;"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>Doctor</th>
+                  <th>Medicine</th>
+                  <th>Dosage</th>
+                  <th>Frequency</th>
+                  <th>Duration</th>
+                  <th>Prescribed</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tPrescriptions">
+                <tr><td colspan="8" class="empty">Loading...</td></tr>
+              </tbody>
             </table>
           </div>
         </div>
@@ -991,6 +1012,53 @@
       <div class="modal-foot">
         <button class="btn btn-outline" onclick="closeM('mAppt')">Cancel</button>
         <button class="btn btn-primary" onclick="saveAppt()"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PRESCRIPTION -->
+  <div class="modal-bg" id="mPrescription">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="mPrescriptionTitle">New Prescription</h3>
+        <button class="close-x" onclick="closeM('mPrescription')">&times;</button>
+      </div>
+      <form id="fPrescription">
+        <input type="hidden" id="rx_id">
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Patient *</label>
+            <select id="rx_patient" required></select>
+          </div>
+          <div class="fg full">
+            <label>Doctor *</label>
+            <select id="rx_doctor" required></select>
+          </div>
+          <div class="fg full">
+            <label>Medicine Name *</label>
+            <input type="text" id="rx_medicine" placeholder="e.g., Paracetamol 500mg" required>
+          </div>
+          <div class="fg">
+            <label>Dosage *</label>
+            <input type="text" id="rx_dosage" placeholder="e.g., 1 tablet" required>
+          </div>
+          <div class="fg">
+            <label>Frequency</label>
+            <input type="text" id="rx_frequency" placeholder="e.g., 3x daily">
+          </div>
+          <div class="fg">
+            <label>Duration</label>
+            <input type="text" id="rx_duration" placeholder="e.g., 7 days">
+          </div>
+          <div class="fg full">
+            <label>Instructions</label>
+            <textarea id="rx_instructions" placeholder="e.g., Take after meals..."></textarea>
+          </div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mPrescription')">Cancel</button>
+        <button class="btn btn-primary" onclick="savePrescription()"><i class="fas fa-save"></i> Save</button>
       </div>
     </div>
   </div>
