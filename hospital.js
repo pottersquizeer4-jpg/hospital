@@ -12,6 +12,9 @@ console.log('🏥 MediCare Hospital started');
 let patients = [];
 let doctors = [];
 let appts = [];
+let currentUser = null;
+let currentUserRole = null;
+let authMode = 'signin';
 
 // ============================================
 // HELPERS
@@ -67,9 +70,169 @@ document.querySelectorAll('.modal-bg').forEach(m => {
 });
 
 // ============================================
+// AUTHENTICATION
+// ============================================
+async function initAuth() {
+  const { data: { session } } = await db.auth.getSession();
+  currentUser = session ? session.user : null;
+  await updateUserUI();
+
+  db.auth.onAuthStateChange(async (_event, session) => {
+    currentUser = session ? session.user : null;
+    await updateUserUI();
+  });
+}
+
+async function updateUserUI() {
+  const label = document.getElementById('userLabel');
+  const emailEl = document.getElementById('userMenuEmail');
+  const roleEl = document.getElementById('userMenuRole');
+  const welcome = document.getElementById('welcomeMsg');
+
+  if (currentUser) {
+    // Pata jina na role
+    const { data } = await db.from('user_profiles')
+      .select('full_name, role')
+      .eq('id', currentUser.id)
+      .single();
+    
+    currentUserRole = data ? data.role : null;
+    const fullName = data ? data.full_name : currentUser.email.split('@')[0];
+    
+    label.textContent = fullName;
+    emailEl.textContent = currentUser.email;
+    roleEl.textContent = (currentUserRole || 'user').toUpperCase();
+    if (welcome) welcome.textContent = 'Karibu, ' + fullName + ' (' + (currentUserRole || 'user') + ')';
+    
+    // Pakia data
+    loadAll();
+  } else {
+    currentUserRole = null;
+    label.textContent = 'Sign In';
+    emailEl.textContent = '—';
+    roleEl.textContent = '—';
+    if (welcome) welcome.textContent = 'Karibu MediCare Hospital';
+    
+    // Futa data
+    patients = [];
+    doctors = [];
+    appts = [];
+    renderPatients();
+    renderDoctors();
+    renderAppts();
+    renderRecent();
+    
+    // Reset stats
+    ['sPatients', 'sDoctors', 'sAppts', 'sPending'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '—';
+    });
+    
+    // Fungua Auth modal
+    setTimeout(() => openAuth(), 300);
+  }
+}
+
+function handleUserClick() {
+  if (currentUser) {
+    document.getElementById('userMenu').classList.toggle('show');
+  } else {
+    openAuth();
+  }
+}
+
+function openAuth() {
+  document.getElementById('mAuth').classList.add('show');
+  switchAuthTab('signin');
+}
+
+function switchAuthTab(mode) {
+  authMode = mode;
+  const isSignIn = mode === 'signin';
+  
+  const tabSignIn = document.getElementById('tabSignIn');
+  const tabSignUp = document.getElementById('tabSignUp');
+  
+  tabSignIn.classList.toggle('active', isSignIn);
+  tabSignUp.classList.toggle('active', !isSignIn);
+  
+  document.getElementById('signupNameField').style.display = isSignIn ? 'none' : 'block';
+  document.getElementById('signupRoleField').style.display = isSignIn ? 'none' : 'block';
+  document.getElementById('authTitle').textContent = isSignIn ? 'Sign In' : 'Create Account';
+  document.getElementById('authSubmitBtn').innerHTML = isSignIn 
+    ? '<i class="fas fa-sign-in-alt"></i> Sign In' 
+    : '<i class="fas fa-user-plus"></i> Create Account';
+}
+
+async function submitAuth() {
+  const email = document.getElementById('a_email').value.trim();
+  const password = document.getElementById('a_password').value;
+  const name = document.getElementById('a_name').value.trim();
+  const role = document.getElementById('a_role').value;
+
+  if (!email || !password) { toast('Jaza email na password', 'error'); return; }
+  if (password.length < 6) { toast('Password iwe angalau 6 characters', 'error'); return; }
+  if (authMode === 'signup' && !name) { toast('Jaza jina lako', 'error'); return; }
+
+  const btn = document.getElementById('authSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inafanya kazi...';
+
+  try {
+    if (authMode === 'signup') {
+      const { data, error } = await db.auth.signUp({ email, password });
+      if (error) throw error;
+      if (data.user) {
+        await db.from('user_profiles').insert([{
+          id: data.user.id,
+          full_name: name,
+          role: role
+        }]);
+      }
+      toast('✅ Account imeundwa! Karibu!');
+    } else {
+      const { error } = await db.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      toast('✅ Karibu tena!');
+    }
+    closeM('mAuth');
+    document.getElementById('a_name').value = '';
+    document.getElementById('a_email').value = '';
+    document.getElementById('a_password').value = '';
+  } catch (err) {
+    let msg = err.message;
+    if (msg.includes('Invalid login')) msg = 'Email au password si sahihi';
+    if (msg.includes('already registered')) msg = 'Email tayari imesajiliwa';
+    toast(msg, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = authMode === 'signin' 
+      ? '<i class="fas fa-sign-in-alt"></i> Sign In' 
+      : '<i class="fas fa-user-plus"></i> Create Account';
+  }
+}
+
+async function signOut() {
+  if (!confirm('Sign out?')) return;
+  await db.auth.signOut();
+  document.getElementById('userMenu').classList.remove('show');
+  toast('Umetoka');
+}
+
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('userMenu');
+  const btn = document.getElementById('userBtn');
+  if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
+    menu.classList.remove('show');
+  }
+});
+
+// ============================================
 // LOAD ALL DATA
 // ============================================
 async function loadAll() {
+  if (!currentUser) return;
+  
   console.log('📊 Loading data...');
   try {
     const [p, d, a, pend] = await Promise.all([
@@ -107,6 +270,13 @@ async function loadAll() {
 // RENDER PATIENTS
 // ============================================
 function renderPatients() {
+  const tb = document.getElementById('tPatients');
+  if (!tb) return;
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="8" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
+
   const q = (document.getElementById('searchP').value || '').toLowerCase().trim();
   const fGender = document.getElementById('filterGender').value;
   const fBlood = document.getElementById('filterBlood').value;
@@ -126,7 +296,6 @@ function renderPatients() {
 
   document.getElementById('resultCountP').textContent = `${list.length} of ${patients.length} patients`;
 
-  const tb = document.getElementById('tPatients');
   if (list.length === 0) {
     tb.innerHTML = '<tr><td colspan="8" class="empty">No patients found</td></tr>';
     return;
@@ -170,6 +339,11 @@ function clearFilters() {
 // ============================================
 function renderDoctors() {
   const tb = document.getElementById('tDoctors');
+  if (!tb) return;
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="6" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
   if (doctors.length === 0) {
     tb.innerHTML = '<tr><td colspan="6" class="empty">No doctors found</td></tr>';
     return;
@@ -202,6 +376,11 @@ function renderDoctors() {
 // ============================================
 function renderAppts() {
   const tb = document.getElementById('tAppts');
+  if (!tb) return;
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="6" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
   if (appts.length === 0) {
     tb.innerHTML = '<tr><td colspan="6" class="empty">No appointments found</td></tr>';
     return;
@@ -226,6 +405,11 @@ function renderAppts() {
 
 function renderRecent() {
   const tb = document.getElementById('tRecent');
+  if (!tb) return;
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="4" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
   const recent = appts.slice(0, 5);
   if (recent.length === 0) {
     tb.innerHTML = '<tr><td colspan="4" class="empty">No appointments yet</td></tr>';
@@ -249,6 +433,7 @@ function renderRecent() {
 // PATIENT CRUD
 // ============================================
 function openPatient() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   document.getElementById('fPatient').reset();
   document.getElementById('p_id').value = '';
   document.getElementById('p_display_id').value = 'Auto-generated on save';
@@ -257,6 +442,7 @@ function openPatient() {
 }
 
 function editPatient(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   const p = patients.find(x => x.id === id);
   if (!p) return;
   document.getElementById('p_id').value = p.id;
@@ -275,6 +461,7 @@ function editPatient(id) {
 }
 
 async function savePatient() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   const id = document.getElementById('p_id').value;
   const data = {
     full_name: document.getElementById('p_name').value.trim(),
@@ -310,6 +497,7 @@ async function savePatient() {
 }
 
 async function delPatient(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   if (!confirm('Delete this patient?')) return;
   const { error } = await db.from('patients').delete().eq('id', id);
   if (error) return toast(error.message, 'error');
@@ -318,6 +506,7 @@ async function delPatient(id) {
 }
 
 function viewPatient(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   const p = patients.find(x => x.id === id);
   if (!p) return;
   document.getElementById('mViewPatientTitle').textContent = 'Patient ' + padId(p.id);
@@ -341,6 +530,7 @@ function viewPatient(id) {
 // DOCTOR CRUD
 // ============================================
 function openDoctor() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   document.getElementById('fDoctor').reset();
   document.getElementById('d_id').value = '';
   document.getElementById('mDoctorTitle').textContent = 'Add Doctor';
@@ -348,6 +538,7 @@ function openDoctor() {
 }
 
 function editDoctor(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   const d = doctors.find(x => x.id === id);
   if (!d) return;
   document.getElementById('d_id').value = d.id;
@@ -363,6 +554,7 @@ function editDoctor(id) {
 }
 
 async function saveDoctor() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   const id = document.getElementById('d_id').value;
   const data = {
     full_name: document.getElementById('d_name').value.trim(),
@@ -391,6 +583,7 @@ async function saveDoctor() {
 }
 
 async function delDoctor(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   if (!confirm('Delete this doctor?')) return;
   const { error } = await db.from('doctors').delete().eq('id', id);
   if (error) return toast(error.message, 'error');
@@ -402,6 +595,7 @@ async function delDoctor(id) {
 // APPOINTMENT CRUD
 // ============================================
 async function openAppt() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   document.getElementById('fAppt').reset();
   const ps = document.getElementById('a_patient');
   const ds = document.getElementById('a_doctor');
@@ -414,6 +608,7 @@ async function openAppt() {
 }
 
 async function saveAppt() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   const data = {
     patient_id: parseInt(document.getElementById('a_patient').value),
     doctor_id: parseInt(document.getElementById('a_doctor').value),
@@ -437,6 +632,7 @@ async function saveAppt() {
 }
 
 async function delAppt(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   if (!confirm('Delete this appointment?')) return;
   const { error } = await db.from('appointments').delete().eq('id', id);
   if (error) return toast(error.message, 'error');
@@ -448,6 +644,7 @@ async function delAppt(id) {
 // EXPORT CSV
 // ============================================
 function exportPatientsCSV() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
   if (patients.length === 0) {
     toast('No patients to export', 'error');
     return;
@@ -480,4 +677,4 @@ function exportPatientsCSV() {
 // ============================================
 // INIT
 // ============================================
-loadAll();
+initAuth();
