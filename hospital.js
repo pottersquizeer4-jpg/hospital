@@ -14,6 +14,7 @@ let doctors = [];
 let appts = [];
 let prescriptions = [];
 let invoices = [];
+let medicines = [];
 let editingInvoiceItems = [];
 let currentUser = null;
 let currentUserRole = null;
@@ -87,6 +88,11 @@ function go(page) {
     }
     loadReports();
   }
+  
+  // Auto-load pharmacy when navigating to it
+  if (page === 'pharmacy') {
+    loadMedicines();
+  }
 }
 
 function openM(id) { document.getElementById(id).classList.add('show'); }
@@ -143,6 +149,7 @@ async function updateUserUI() {
     appts = [];
     prescriptions = [];
     invoices = [];
+    medicines = [];
     editingInvoiceItems = [];
     renderPatients();
     renderDoctors();
@@ -151,6 +158,8 @@ async function updateUserUI() {
     renderPrescriptions();
     renderInvoices();
     renderBillingStats();
+    renderMedicines();
+    renderPharmacyStats();
     
     ['sPatients', 'sDoctors', 'sAppts', 'sPending'].forEach(id => {
       const el = document.getElementById(id);
@@ -295,6 +304,12 @@ async function loadAll() {
     invoices = invd || [];
     renderInvoices();
     renderBillingStats();
+
+    // Load medicines
+    const { data: meds } = await db.from('medicines').select('*').order('name');
+    medicines = meds || [];
+    renderMedicines();
+    renderPharmacyStats();
 
     console.log('✅ Data loaded');
   } catch (err) {
@@ -1208,14 +1223,12 @@ async function loadReports() {
   const input = document.getElementById('reportMonth');
   if (input && !input.value) input.value = ym;
   
-  // Loading state
   ['tTopDoctors', 'tTopMeds', 'tMonthlyRevenue'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = '<tr><td colspan="5" class="empty"><i class="fas fa-spinner fa-spin"></i> Loading...</td></tr>';
   });
   
   try {
-    // ---- 1. Stats za mwezi ----
     const [pRes, aRes, rxRes, invRes] = await Promise.all([
       db.from('patients').select('*', { count: 'exact', head: true })
         .gte('created_at', start).lt('created_at', end),
@@ -1239,7 +1252,6 @@ async function loadReports() {
     document.getElementById('rRx').textContent = reportData.rx;
     document.getElementById('rRevenue').textContent = reportData.revenue.toLocaleString();
     
-    // ---- 2-4. Load others in parallel ----
     await Promise.all([
       loadTopDoctors(start, end),
       loadTopMedicines(start, end),
@@ -1402,7 +1414,6 @@ async function loadMonthlyRevenue() {
   
   reportData.monthlyRevenue = list;
   
-  // Find max for bars
   const maxRev = Math.max(...list.map(m => m.revenue), 1);
   
   if (list.length === 0) {
@@ -1472,6 +1483,449 @@ function exportReportCSV() {
   link.download = 'report_' + ym + '.csv';
   link.click();
   toast('✅ Report ime-export');
+}
+
+// ============================================
+// PHARMACY
+// ============================================
+async function loadMedicines() {
+  if (!currentUser) return;
+  const { data, error } = await db
+    .from('medicines')
+    .select('*')
+    .order('name');
+  if (error) {
+    console.error('Load medicines error:', error);
+    return;
+  }
+  medicines = data || [];
+  renderMedicines();
+  renderPharmacyStats();
+}
+
+function renderPharmacyStats() {
+  const el = document.getElementById('phTotal');
+  if (!el) return;
+  
+  const total = medicines.length;
+  const lowStock = medicines.filter(m => (m.stock_quantity || 0) > 0 && (m.stock_quantity || 0) <= (m.reorder_level || 10)).length;
+  const outStock = medicines.filter(m => (m.stock_quantity || 0) === 0).length;
+  
+  const today = new Date();
+  const in90 = new Date();
+  in90.setDate(today.getDate() + 90);
+  
+  const expiring = medicines.filter(m => {
+    if (!m.expiry_date) return false;
+    const exp = new Date(m.expiry_date);
+    return exp <= in90;
+  }).length;
+  
+  const totalValue = medicines.reduce((s, m) => s + ((m.stock_quantity || 0) * (m.cost_price || 0)), 0);
+  
+  document.getElementById('phTotal').textContent = total;
+  document.getElementById('phLowStock').textContent = lowStock + outStock;
+  document.getElementById('phExpiring').textContent = expiring;
+  document.getElementById('phValue').textContent = totalValue.toLocaleString();
+}
+
+function getExpiryStatus(expiry) {
+  if (!expiry) return { status: 'ok', label: '—', class: '' };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const exp = new Date(expiry);
+  exp.setHours(0, 0, 0, 0);
+  const daysLeft = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
+  
+  if (daysLeft < 0) return { status: 'expired', label: 'Expired', class: 'b-expired', days: daysLeft };
+  if (daysLeft <= 90) return { status: 'soon', label: `${daysLeft}d left`, class: 'b-expiring', days: daysLeft };
+  return { status: 'ok', label: fmtDate(expiry), class: 'b-completed', days: daysLeft };
+}
+
+function getStockStatus(med) {
+  const qty = med.stock_quantity || 0;
+  const reorder = med.reorder_level || 10;
+  if (qty === 0) return { status: 'out', label: 'Out of Stock', class: 'b-out-stock' };
+  if (qty <= reorder) return { status: 'low', label: 'Low Stock', class: 'b-low-stock' };
+  return { status: 'ok', label: 'In Stock', class: 'b-completed' };
+}
+
+function renderMedicines() {
+  const tb = document.getElementById('tMedicines');
+  if (!tb) return;
+  
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="9" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
+  
+  const q = (document.getElementById('searchMed').value || '').toLowerCase().trim();
+  const fCat = document.getElementById('filterMedCat').value;
+  const fStock = document.getElementById('filterMedStock').value;
+  const fExpiry = document.getElementById('filterMedExpiry').value;
+  
+  const list = medicines.filter(m => {
+    if (q) {
+      const name = (m.name || '').toLowerCase();
+      const generic = (m.generic_name || '').toLowerCase();
+      const cat = (m.category || '').toLowerCase();
+      if (!name.includes(q) && !generic.includes(q) && !cat.includes(q)) return false;
+    }
+    if (fCat && m.category !== fCat) return false;
+    
+    const stockSt = getStockStatus(m);
+    if (fStock === 'low' && stockSt.status !== 'low') return false;
+    if (fStock === 'out' && stockSt.status !== 'out') return false;
+    if (fStock === 'ok' && stockSt.status !== 'ok') return false;
+    
+    const expSt = getExpiryStatus(m.expiry_date);
+    if (fExpiry === 'expired' && expSt.status !== 'expired') return false;
+    if (fExpiry === 'soon' && expSt.status !== 'soon') return false;
+    if (fExpiry === 'ok' && expSt.status !== 'ok') return false;
+    
+    return true;
+  });
+  
+  document.getElementById('resultCountMed').textContent = `${list.length} of ${medicines.length} medicines`;
+  
+  if (list.length === 0) {
+    tb.innerHTML = '<tr><td colspan="9" class="empty">Hakuna dawa zilizopatikana</td></tr>';
+    return;
+  }
+  
+  tb.innerHTML = list.map(m => {
+    const stockSt = getStockStatus(m);
+    const expSt = getExpiryStatus(m.expiry_date);
+    return `
+      <tr>
+        <td>
+          <div class="user-cell">
+            <div class="avatar" style="background:#e0f2fe; color:#0369a1;"><i class="fas fa-pills"></i></div>
+            <div>
+              <div class="name">${esc(m.name)}</div>
+              <div class="email">${esc(m.generic_name || m.manufacturer || '')}</div>
+            </div>
+          </div>
+        </td>
+        <td>${esc(m.category || '—')}</td>
+        <td><strong>${m.stock_quantity || 0}</strong></td>
+        <td>${esc(m.unit || '—')}</td>
+        <td>${(m.cost_price || 0).toLocaleString()} TZS</td>
+        <td><strong>${(m.selling_price || 0).toLocaleString()} TZS</strong></td>
+        <td><span class="badge ${expSt.class}">${expSt.label}</span></td>
+        <td><span class="badge ${stockSt.class}">${stockSt.label}</span></td>
+        <td>
+          <button class="btn-icon" onclick="viewMedicine(${m.id})" title="View"><i class="fas fa-eye"></i></button>
+          <button class="btn-icon" onclick="openStockIn(${m.id})" title="Stock In" style="color:var(--success);"><i class="fas fa-arrow-down"></i></button>
+          <button class="btn-icon" onclick="openStockOut(${m.id})" title="Stock Out" style="color:var(--warning);"><i class="fas fa-arrow-up"></i></button>
+          <button class="btn-icon" onclick="editMedicine(${m.id})" title="Edit"><i class="fas fa-pen"></i></button>
+          <button class="btn-icon" onclick="delMedicine(${m.id})" title="Delete"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function clearMedFilters() {
+  document.getElementById('searchMed').value = '';
+  document.getElementById('filterMedCat').value = '';
+  document.getElementById('filterMedStock').value = '';
+  document.getElementById('filterMedExpiry').value = '';
+  renderMedicines();
+}
+
+// ---- MEDICINE CRUD ----
+function openMedicine() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  document.getElementById('fMedicine').reset();
+  document.getElementById('med_id').value = '';
+  document.getElementById('med_stock').value = 0;
+  document.getElementById('med_reorder').value = 10;
+  document.getElementById('med_cost').value = 0;
+  document.getElementById('med_price').value = 0;
+  document.getElementById('mMedicineTitle').textContent = 'Add Medicine';
+  openM('mMedicine');
+}
+
+function editMedicine(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const m = medicines.find(x => x.id === id);
+  if (!m) return;
+  document.getElementById('med_id').value = m.id;
+  document.getElementById('med_name').value = m.name || '';
+  document.getElementById('med_generic').value = m.generic_name || '';
+  document.getElementById('med_category').value = m.category || '';
+  document.getElementById('med_unit').value = m.unit || 'tablet';
+  document.getElementById('med_manufacturer').value = m.manufacturer || '';
+  document.getElementById('med_batch').value = m.batch_number || '';
+  document.getElementById('med_stock').value = m.stock_quantity || 0;
+  document.getElementById('med_reorder').value = m.reorder_level || 10;
+  document.getElementById('med_cost').value = m.cost_price || 0;
+  document.getElementById('med_price').value = m.selling_price || 0;
+  document.getElementById('med_expiry').value = m.expiry_date || '';
+  document.getElementById('med_desc').value = m.description || '';
+  document.getElementById('mMedicineTitle').textContent = 'Edit Medicine';
+  openM('mMedicine');
+}
+
+async function saveMedicine() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const id = document.getElementById('med_id').value;
+  
+  const data = {
+    name: document.getElementById('med_name').value.trim(),
+    generic_name: document.getElementById('med_generic').value.trim() || null,
+    category: document.getElementById('med_category').value || null,
+    unit: document.getElementById('med_unit').value,
+    manufacturer: document.getElementById('med_manufacturer').value.trim() || null,
+    batch_number: document.getElementById('med_batch').value.trim() || null,
+    stock_quantity: parseInt(document.getElementById('med_stock').value) || 0,
+    reorder_level: parseInt(document.getElementById('med_reorder').value) || 10,
+    cost_price: parseFloat(document.getElementById('med_cost').value) || 0,
+    selling_price: parseFloat(document.getElementById('med_price').value) || 0,
+    expiry_date: document.getElementById('med_expiry').value || null,
+    description: document.getElementById('med_desc').value.trim() || null,
+    updated_at: new Date().toISOString()
+  };
+  
+  if (!data.name) {
+    toast('Jaza jina la dawa', 'error');
+    return;
+  }
+  
+  try {
+    if (id) {
+      const { error } = await db.from('medicines').update(data).eq('id', id);
+      if (error) throw error;
+      toast('✅ Dawa ime-update');
+    } else {
+      const { error } = await db.from('medicines').insert([data]);
+      if (error) throw error;
+      toast('✅ Dawa imeongezwa');
+    }
+    closeM('mMedicine');
+    loadMedicines();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function delMedicine(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  if (!confirm('Futa dawa hii?')) return;
+  const { error } = await db.from('medicines').delete().eq('id', id);
+  if (error) return toast(error.message, 'error');
+  toast('Dawa imefutwa');
+  loadMedicines();
+}
+
+async function viewMedicine(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const m = medicines.find(x => x.id === id);
+  if (!m) return;
+  
+  const { data: movements } = await db
+    .from('stock_movements')
+    .select('*')
+    .eq('medicine_id', id)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  
+  const stockSt = getStockStatus(m);
+  const expSt = getExpiryStatus(m.expiry_date);
+  
+  document.getElementById('mViewMedicineTitle').textContent = m.name;
+  document.getElementById('viewMedicineContent').innerHTML = `
+    <div class="detail-row"><strong>Name</strong><span>${esc(m.name)}</span></div>
+    <div class="detail-row"><strong>Generic Name</strong><span>${esc(m.generic_name || '—')}</span></div>
+    <div class="detail-row"><strong>Category</strong><span>${esc(m.category || '—')}</span></div>
+    <div class="detail-row"><strong>Manufacturer</strong><span>${esc(m.manufacturer || '—')}</span></div>
+    <div class="detail-row"><strong>Batch #</strong><span>${esc(m.batch_number || '—')}</span></div>
+    <div class="detail-row"><strong>Stock</strong><span><strong>${m.stock_quantity || 0} ${esc(m.unit || '')}</strong> <span class="badge ${stockSt.class}">${stockSt.label}</span></span></div>
+    <div class="detail-row"><strong>Reorder Level</strong><span>${m.reorder_level || 10}</span></div>
+    <div class="detail-row"><strong>Cost Price</strong><span>${(m.cost_price || 0).toLocaleString()} TZS</span></div>
+    <div class="detail-row"><strong>Selling Price</strong><span><strong style="color:var(--primary);">${(m.selling_price || 0).toLocaleString()} TZS</strong></span></div>
+    <div class="detail-row"><strong>Expiry Date</strong><span><span class="badge ${expSt.class}">${expSt.label}</span></span></div>
+    <div class="detail-row"><strong>Description</strong><span>${esc(m.description || '—')}</span></div>
+    
+    <h4 style="margin:1.5rem 0 0.75rem;">📊 Historia ya Stock (10 za mwisho)</h4>
+    ${(movements || []).length === 0 ? '<p style="color:var(--gray-500); font-size:0.85rem;">Hakuna historia bado.</p>' : `
+      <table style="font-size:0.85rem;">
+        <thead>
+          <tr><th>Tarehe</th><th>Aina</th><th>Idadi</th><th>Sababu</th></tr>
+        </thead>
+        <tbody>
+          ${movements.map(mv => `
+            <tr>
+              <td>${fmt(mv.created_at)}</td>
+              <td><span class="badge ${mv.movement_type === 'in' ? 'b-completed' : 'b-pending'}">${mv.movement_type === 'in' ? '📥 IN' : '📤 OUT'}</span></td>
+              <td><strong>${mv.quantity}</strong></td>
+              <td>${esc(mv.reason || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `}
+  `;
+  openM('mViewMedicine');
+}
+
+// ---- STOCK IN ----
+function openStockIn(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const m = medicines.find(x => x.id === id);
+  if (!m) return;
+  document.getElementById('fStockIn').reset();
+  document.getElementById('si_med_id').value = m.id;
+  document.getElementById('si_med_name').value = m.name;
+  document.getElementById('si_current').value = (m.stock_quantity || 0) + ' ' + (m.unit || '');
+  document.getElementById('si_qty').value = 1;
+  openM('mStockIn');
+}
+
+async function saveStockIn() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const medId = parseInt(document.getElementById('si_med_id').value);
+  const qty = parseInt(document.getElementById('si_qty').value);
+  const reason = document.getElementById('si_reason').value.trim();
+  const notes = document.getElementById('si_notes').value.trim();
+  
+  if (!medId || !qty || qty <= 0) {
+    toast('Weka idadi sahihi', 'error');
+    return;
+  }
+  if (!reason) {
+    toast('Jaza sababu', 'error');
+    return;
+  }
+  
+  const m = medicines.find(x => x.id === medId);
+  if (!m) return;
+  
+  try {
+    const newQty = (m.stock_quantity || 0) + qty;
+    const { error: updErr } = await db
+      .from('medicines')
+      .update({ stock_quantity: newQty, updated_at: new Date().toISOString() })
+      .eq('id', medId);
+    if (updErr) throw updErr;
+    
+    const { error: mvErr } = await db.from('stock_movements').insert([{
+      medicine_id: medId,
+      movement_type: 'in',
+      quantity: qty,
+      reason: reason,
+      notes: notes || null,
+      created_by: currentUser.id
+    }]);
+    if (mvErr) throw mvErr;
+    
+    toast(`✅ Stock imeongezwa: +${qty} ${m.unit || ''}`);
+    closeM('mStockIn');
+    loadMedicines();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ---- STOCK OUT ----
+function openStockOut(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const m = medicines.find(x => x.id === id);
+  if (!m) return;
+  document.getElementById('fStockOut').reset();
+  document.getElementById('so_med_id').value = m.id;
+  document.getElementById('so_med_name').value = m.name;
+  document.getElementById('so_current').value = (m.stock_quantity || 0) + ' ' + (m.unit || '');
+  document.getElementById('so_qty').value = 1;
+  openM('mStockOut');
+}
+
+async function saveStockOut() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  const medId = parseInt(document.getElementById('so_med_id').value);
+  const qty = parseInt(document.getElementById('so_qty').value);
+  const reason = document.getElementById('so_reason').value.trim();
+  const notes = document.getElementById('so_notes').value.trim();
+  
+  if (!medId || !qty || qty <= 0) {
+    toast('Weka idadi sahihi', 'error');
+    return;
+  }
+  if (!reason) {
+    toast('Jaza sababu', 'error');
+    return;
+  }
+  
+  const m = medicines.find(x => x.id === medId);
+  if (!m) return;
+  
+  if (qty > (m.stock_quantity || 0)) {
+    toast(`Stock haitoshi! Iliyopo: ${m.stock_quantity || 0}`, 'error');
+    return;
+  }
+  
+  try {
+    const newQty = (m.stock_quantity || 0) - qty;
+    const { error: updErr } = await db
+      .from('medicines')
+      .update({ stock_quantity: newQty, updated_at: new Date().toISOString() })
+      .eq('id', medId);
+    if (updErr) throw updErr;
+    
+    const { error: mvErr } = await db.from('stock_movements').insert([{
+      medicine_id: medId,
+      movement_type: 'out',
+      quantity: qty,
+      reason: reason,
+      notes: notes || null,
+      created_by: currentUser.id
+    }]);
+    if (mvErr) throw mvErr;
+    
+    toast(`✅ Stock imetolewa: -${qty} ${m.unit || ''}`);
+    closeM('mStockOut');
+    loadMedicines();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ---- EXPORT MEDICINES CSV ----
+function exportMedicinesCSV() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  if (medicines.length === 0) {
+    toast('Hakuna dawa za ku-export', 'error');
+    return;
+  }
+  const headers = ['Name', 'Generic', 'Category', 'Unit', 'Stock', 'Reorder Level', 'Cost Price', 'Selling Price', 'Expiry', 'Manufacturer', 'Batch', 'Status'];
+  const rows = medicines.map(m => {
+    const stockSt = getStockStatus(m);
+    const expSt = getExpiryStatus(m.expiry_date);
+    return [
+      m.name || '',
+      m.generic_name || '',
+      m.category || '',
+      m.unit || '',
+      m.stock_quantity || 0,
+      m.reorder_level || 0,
+      m.cost_price || 0,
+      m.selling_price || 0,
+      m.expiry_date || '',
+      m.manufacturer || '',
+      m.batch_number || '',
+      `${stockSt.label} / ${expSt.label}`
+    ];
+  });
+  const csv = [headers, ...rows]
+    .map(row => row.map(cell => '"' + String(cell).replace(/"/g, '""') + '"').join(','))
+    .join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'medicines_' + new Date().toISOString().slice(0, 10) + '.csv';
+  link.click();
+  toast('✅ Medicines CSV exported');
 }
 
 // ============================================
