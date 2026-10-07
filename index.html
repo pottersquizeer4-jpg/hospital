@@ -420,6 +420,12 @@
     .b-cancelled { background: #fee2e2; color: #991b1b; }
     .b-partial { background: #e0e7ff; color: #3730a3; }
 
+    /* PHARMACY BADGES */
+    .b-low-stock { background: #fef3c7; color: #92400e; }
+    .b-out-stock { background: #fee2e2; color: #991b1b; }
+    .b-expired { background: #fee2e2; color: #991b1b; }
+    .b-expiring { background: #fed7aa; color: #9a3412; }
+
     /* RANK BADGES (Reports) */
     .rank-badge {
       display: inline-flex;
@@ -741,6 +747,7 @@
       <button class="nav-btn" data-page="prescriptions"><i class="fas fa-prescription"></i> Prescriptions</button>
       <button class="nav-btn" data-page="billing"><i class="fas fa-file-invoice-dollar"></i> Billing</button>
       <button class="nav-btn" data-page="reports"><i class="fas fa-chart-line"></i> Reports</button>
+      <button class="nav-btn" data-page="pharmacy"><i class="fas fa-pills"></i> Pharmacy</button>
     </aside>
 
     <main class="main">
@@ -1002,7 +1009,6 @@
           </div>
         </div>
 
-        <!-- Stats za mwezi -->
         <div class="stats">
           <div class="stat">
             <div class="stat-icon blue"><i class="fas fa-users"></i></div>
@@ -1034,7 +1040,6 @@
           </div>
         </div>
 
-        <!-- Madaktari Bora -->
         <div class="card">
           <div class="card-head">
             <h3>👨‍⚕️ Madaktari Bora</h3>
@@ -1055,7 +1060,6 @@
           </div>
         </div>
 
-        <!-- Dawa Zinazotumika -->
         <div class="card">
           <div class="card-head">
             <h3>💊 Dawa Zinazotumika</h3>
@@ -1073,7 +1077,6 @@
           </div>
         </div>
 
-        <!-- Mapato kwa Mwezi -->
         <div class="card">
           <div class="card-head">
             <h3>💰 Mapato kwa Mwezi</h3>
@@ -1086,6 +1089,106 @@
               </thead>
               <tbody id="tMonthlyRevenue">
                 <tr><td colspan="4" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- PHARMACY -->
+      <section class="page" id="page-pharmacy">
+        <div class="page-head">
+          <div>
+            <h2>Pharmacy</h2>
+            <p class="sub">Usimamizi wa dawa na stock</p>
+          </div>
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="exportMedicinesCSV()"><i class="fas fa-file-csv"></i> Export</button>
+            <button class="btn btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+            <button class="btn btn-primary" onclick="openMedicine()"><i class="fas fa-plus"></i> Add Medicine</button>
+          </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-icon blue"><i class="fas fa-pills"></i></div>
+            <div>
+              <div class="stat-num" id="phTotal">—</div>
+              <div class="stat-label">Jumla ya Dawa</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon amber"><i class="fas fa-exclamation-triangle"></i></div>
+            <div>
+              <div class="stat-num" id="phLowStock">—</div>
+              <div class="stat-label">Stock Ndogo</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon red"><i class="fas fa-calendar-times"></i></div>
+            <div>
+              <div class="stat-num" id="phExpiring">—</div>
+              <div class="stat-label">Zinazoisha (90d)</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon green"><i class="fas fa-coins"></i></div>
+            <div>
+              <div class="stat-num" id="phValue">—</div>
+              <div class="stat-label">Thamani (TZS)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Medicines Table -->
+        <div class="card">
+          <div class="card-head">
+            <input type="text" class="search" id="searchMed" placeholder="Search by name, category..." oninput="renderMedicines()">
+            <span id="resultCountMed" style="margin-left:auto; font-size:0.85rem; color:var(--gray-500); font-weight:600;"></span>
+          </div>
+          <div class="filter-bar">
+            <label style="font-weight:600; font-size:0.85rem; color:var(--gray-700);">Filter:</label>
+            <select id="filterMedCat" onchange="renderMedicines()">
+              <option value="">All Categories</option>
+              <option value="Antibiotic">Antibiotic</option>
+              <option value="Painkiller">Painkiller</option>
+              <option value="Antimalarial">Antimalarial</option>
+              <option value="Vitamin">Vitamin</option>
+              <option value="Antiseptic">Antiseptic</option>
+              <option value="Other">Other</option>
+            </select>
+            <select id="filterMedStock" onchange="renderMedicines()">
+              <option value="">All Stock</option>
+              <option value="low">Low Stock</option>
+              <option value="out">Out of Stock</option>
+              <option value="ok">In Stock</option>
+            </select>
+            <select id="filterMedExpiry" onchange="renderMedicines()">
+              <option value="">All Expiry</option>
+              <option value="expired">Expired</option>
+              <option value="soon">Expiring Soon (90d)</option>
+              <option value="ok">OK</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearMedFilters()"><i class="fas fa-times"></i> Clear</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Category</th>
+                  <th>Stock</th>
+                  <th>Unit</th>
+                  <th>Cost</th>
+                  <th>Selling</th>
+                  <th>Expiry</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tMedicines">
+                <tr><td colspan="9" class="empty">Loading...</td></tr>
               </tbody>
             </table>
           </div>
@@ -1428,6 +1531,149 @@
       <div class="modal-foot">
         <button class="btn btn-outline" onclick="closeM('mEditInvoice')">Cancel</button>
         <button class="btn btn-primary" onclick="updateInvoice()"><i class="fas fa-save"></i> Update Invoice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: MEDICINE -->
+  <div class="modal-bg" id="mMedicine">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="mMedicineTitle">Add Medicine</h3>
+        <button class="close-x" onclick="closeM('mMedicine')">&times;</button>
+      </div>
+      <form id="fMedicine">
+        <input type="hidden" id="med_id">
+        <div class="fgrid">
+          <div class="fg full"><label>Medicine Name *</label><input type="text" id="med_name" required placeholder="e.g., Paracetamol"></div>
+          <div class="fg full"><label>Generic Name</label><input type="text" id="med_generic" placeholder="e.g., Acetaminophen"></div>
+          <div class="fg">
+            <label>Category</label>
+            <select id="med_category">
+              <option value="">Select</option>
+              <option value="Antibiotic">Antibiotic</option>
+              <option value="Painkiller">Painkiller</option>
+              <option value="Antimalarial">Antimalarial</option>
+              <option value="Vitamin">Vitamin</option>
+              <option value="Antiseptic">Antiseptic</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="fg"><label>Unit *</label>
+            <select id="med_unit">
+              <option value="tablet">Tablet</option>
+              <option value="capsule">Capsule</option>
+              <option value="syrup">Syrup (ml)</option>
+              <option value="injection">Injection</option>
+              <option value="cream">Cream</option>
+              <option value="drops">Drops</option>
+            </select>
+          </div>
+          <div class="fg"><label>Manufacturer</label><input type="text" id="med_manufacturer"></div>
+          <div class="fg"><label>Batch Number</label><input type="text" id="med_batch"></div>
+          <div class="fg"><label>Stock Quantity *</label><input type="number" id="med_stock" min="0" value="0" required></div>
+          <div class="fg"><label>Reorder Level</label><input type="number" id="med_reorder" min="0" value="10"></div>
+          <div class="fg"><label>Cost Price (TZS) *</label><input type="number" id="med_cost" min="0" step="0.01" value="0" required></div>
+          <div class="fg"><label>Selling Price (TZS) *</label><input type="number" id="med_price" min="0" step="0.01" value="0" required></div>
+          <div class="fg full"><label>Expiry Date</label><input type="date" id="med_expiry"></div>
+          <div class="fg full"><label>Description</label><textarea id="med_desc" placeholder="Maelezo ya dawa..."></textarea></div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mMedicine')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveMedicine()"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: STOCK IN -->
+  <div class="modal-bg" id="mStockIn">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-head">
+        <h3>📥 Stock In</h3>
+        <button class="close-x" onclick="closeM('mStockIn')">&times;</button>
+      </div>
+      <form id="fStockIn">
+        <input type="hidden" id="si_med_id">
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Medicine</label>
+            <input type="text" id="si_med_name" readonly>
+          </div>
+          <div class="fg full">
+            <label>Current Stock</label>
+            <input type="text" id="si_current" readonly>
+          </div>
+          <div class="fg full">
+            <label>Quantity to Add *</label>
+            <input type="number" id="si_qty" min="1" value="1" required>
+          </div>
+          <div class="fg full">
+            <label>Supplier / Reason *</label>
+            <input type="text" id="si_reason" placeholder="e.g., Purchase from supplier" required>
+          </div>
+          <div class="fg full">
+            <label>Notes</label>
+            <textarea id="si_notes"></textarea>
+          </div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mStockIn')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveStockIn()"><i class="fas fa-arrow-down"></i> Add Stock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: STOCK OUT -->
+  <div class="modal-bg" id="mStockOut">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-head">
+        <h3>📤 Stock Out</h3>
+        <button class="close-x" onclick="closeM('mStockOut')">&times;</button>
+      </div>
+      <form id="fStockOut">
+        <input type="hidden" id="so_med_id">
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Medicine</label>
+            <input type="text" id="so_med_name" readonly>
+          </div>
+          <div class="fg full">
+            <label>Current Stock</label>
+            <input type="text" id="so_current" readonly>
+          </div>
+          <div class="fg full">
+            <label>Quantity to Remove *</label>
+            <input type="number" id="so_qty" min="1" value="1" required>
+          </div>
+          <div class="fg full">
+            <label>Reason *</label>
+            <input type="text" id="so_reason" placeholder="e.g., Dispensed to patient" required>
+          </div>
+          <div class="fg full">
+            <label>Notes</label>
+            <textarea id="so_notes"></textarea>
+          </div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mStockOut')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveStockOut()"><i class="fas fa-arrow-up"></i> Remove Stock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: VIEW MEDICINE -->
+  <div class="modal-bg" id="mViewMedicine">
+    <div class="modal" style="max-width:600px;">
+      <div class="modal-head">
+        <h3 id="mViewMedicineTitle">Medicine Details</h3>
+        <button class="close-x" onclick="closeM('mViewMedicine')">&times;</button>
+      </div>
+      <div id="viewMedicineContent"></div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mViewMedicine')">Close</button>
       </div>
     </div>
   </div>
