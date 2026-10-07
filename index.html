@@ -1234,6 +1234,60 @@
     </div>
   </div>
 
+  <!-- MODAL: EDIT INVOICE -->
+  <div class="modal-bg" id="mEditInvoice">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-head">
+        <h3 id="mEditInvoiceTitle">Edit Invoice</h3>
+        <button class="close-x" onclick="closeM('mEditInvoice')">&times;</button>
+      </div>
+      <form id="fEditInvoice">
+        <input type="hidden" id="edit_inv_id">
+        
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Invoice #</label>
+            <input type="text" id="edit_inv_number" readonly>
+          </div>
+          <div class="fg full">
+            <label>Patient</label>
+            <input type="text" id="edit_inv_patient" readonly>
+          </div>
+          <div class="fg full">
+            <label>Total Amount</label>
+            <input type="text" id="edit_inv_total" readonly style="color:var(--primary); font-weight:800;">
+          </div>
+          <div class="fg">
+            <label>Payment Method</label>
+            <select id="edit_inv_payment">
+              <option value="cash">💵 Cash</option>
+              <option value="mpesa">📱 M-Pesa</option>
+              <option value="insurance">🏥 Insurance</option>
+              <option value="card">💳 Card</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Status</label>
+            <select id="edit_inv_status">
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="fg full">
+            <label>Notes</label>
+            <textarea id="edit_inv_notes" placeholder="Maelezo ya ziada..."></textarea>
+          </div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mEditInvoice')">Cancel</button>
+        <button class="btn btn-primary" onclick="updateInvoice()"><i class="fas fa-save"></i> Update Invoice</button>
+      </div>
+    </div>
+  </div>
+
   <!-- JavaScript -->
   <script src="hospital.js"></script>
 </body>
