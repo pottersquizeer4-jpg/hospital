@@ -420,6 +420,37 @@
     .b-cancelled { background: #fee2e2; color: #991b1b; }
     .b-partial { background: #e0e7ff; color: #3730a3; }
 
+    /* RANK BADGES (Reports) */
+    .rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 0.8rem;
+    }
+    .rank-1 { background: #fef3c7; color: #92400e; }
+    .rank-2 { background: #e2e8f0; color: #475569; }
+    .rank-3 { background: #fed7aa; color: #9a3412; }
+    .rank-other { background: var(--gray-100); color: var(--gray-500); }
+
+    /* REVENUE BAR */
+    .revenue-bar {
+      height: 6px;
+      background: var(--gray-100);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-top: 0.3rem;
+    }
+    .revenue-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--success));
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
     /* MODAL */
     .modal-bg {
       position: fixed;
@@ -659,9 +690,17 @@
 
     /* PRINT */
     @media print {
-      .side, .btn, .search, .filter-bar, .nav-btn, .top-bar, .modal-foot { display: none !important; }
+      .side, .btn, .search, .filter-bar, .nav-btn, .top-bar, .modal-foot,
+      .user-area, .page-head button { display: none !important; }
       .main { padding: 1rem; }
-      .card { border: 1px solid #ccc; box-shadow: none; }
+      .app { grid-template-columns: 1fr; }
+      .card { border: 1px solid #ccc; box-shadow: none; page-break-inside: avoid; }
+      .stats { grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+      .stat { border: 1px solid #ccc; padding: 0.75rem; }
+      .stat-num { font-size: 1.2rem; }
+      .page { display: none; }
+      .page.active { display: block; }
+      body { background: white; }
     }
   </style>
 </head>
@@ -701,6 +740,7 @@
       <button class="nav-btn" data-page="appointments"><i class="fas fa-calendar-check"></i> Appointments</button>
       <button class="nav-btn" data-page="prescriptions"><i class="fas fa-prescription"></i> Prescriptions</button>
       <button class="nav-btn" data-page="billing"><i class="fas fa-file-invoice-dollar"></i> Billing</button>
+      <button class="nav-btn" data-page="reports"><i class="fas fa-chart-line"></i> Reports</button>
     </aside>
 
     <main class="main">
@@ -942,6 +982,110 @@
               </thead>
               <tbody id="tInvoices">
                 <tr><td colspan="7" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- REPORTS -->
+      <section class="page" id="page-reports">
+        <div class="page-head">
+          <div>
+            <h2>Reports</h2>
+            <p class="sub">Ripoti za hospitali — wagonjwa, miadi, madaktari, na mapato</p>
+          </div>
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <input type="month" id="reportMonth" class="search" style="min-width:160px;" onchange="loadReports()">
+            <button class="btn btn-outline" onclick="exportReportCSV()"><i class="fas fa-file-csv"></i> Export</button>
+            <button class="btn btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+          </div>
+        </div>
+
+        <!-- Stats za mwezi -->
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-icon blue"><i class="fas fa-users"></i></div>
+            <div>
+              <div class="stat-num" id="rPatients">—</div>
+              <div class="stat-label">Wagonjwa Wapya</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon amber"><i class="fas fa-calendar-check"></i></div>
+            <div>
+              <div class="stat-num" id="rAppts">—</div>
+              <div class="stat-label">Miadi</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon green"><i class="fas fa-dollar-sign"></i></div>
+            <div>
+              <div class="stat-num" id="rRevenue">—</div>
+              <div class="stat-label">Mapato (TZS)</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon purple"><i class="fas fa-prescription"></i></div>
+            <div>
+              <div class="stat-num" id="rRx">—</div>
+              <div class="stat-label">Prescriptions</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Madaktari Bora -->
+        <div class="card">
+          <div class="card-head">
+            <h3>👨‍⚕️ Madaktari Bora</h3>
+            <span style="font-size:0.8rem; color:var(--gray-500);">Kwa miadi na mapato</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th><th>Daktari</th><th>Specialization</th>
+                  <th>Miadi</th><th>Mapato (TZS)</th>
+                </tr>
+              </thead>
+              <tbody id="tTopDoctors">
+                <tr><td colspan="5" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Dawa Zinazotumika -->
+        <div class="card">
+          <div class="card-head">
+            <h3>💊 Dawa Zinazotumika</h3>
+            <span style="font-size:0.8rem; color:var(--gray-500);">Top prescriptions</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>#</th><th>Dawa</th><th>Idadi</th><th>Wagonjwa</th></tr>
+              </thead>
+              <tbody id="tTopMeds">
+                <tr><td colspan="4" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Mapato kwa Mwezi -->
+        <div class="card">
+          <div class="card-head">
+            <h3>💰 Mapato kwa Mwezi</h3>
+            <span style="font-size:0.8rem; color:var(--gray-500);">Miezi 12 iliyopita</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Mwezi</th><th>Invoices</th><th>Zilizolipwa</th><th>Mapato (TZS)</th></tr>
+              </thead>
+              <tbody id="tMonthlyRevenue">
+                <tr><td colspan="4" class="empty">Loading...</td></tr>
               </tbody>
             </table>
           </div>
