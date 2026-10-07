@@ -13,6 +13,8 @@ let patients = [];
 let doctors = [];
 let appts = [];
 let prescriptions = [];
+let invoices = [];
+let editingInvoiceItems = [];
 let currentUser = null;
 let currentUserRole = null;
 let authMode = 'signin';
@@ -116,11 +118,15 @@ async function updateUserUI() {
     doctors = [];
     appts = [];
     prescriptions = [];
+    invoices = [];
+    editingInvoiceItems = [];
     renderPatients();
     renderDoctors();
     renderAppts();
     renderRecent();
     renderPrescriptions();
+    renderInvoices();
+    renderBillingStats();
     
     ['sPatients', 'sDoctors', 'sAppts', 'sPending'].forEach(id => {
       const el = document.getElementById(id);
@@ -260,6 +266,11 @@ async function loadAll() {
     const { data: rxd } = await db.from('prescriptions').select('*').order('prescribed_at', { ascending: false });
     prescriptions = rxd || [];
     renderPrescriptions();
+
+    const { data: invd } = await db.from('invoices').select('*').order('created_at', { ascending: false });
+    invoices = invd || [];
+    renderInvoices();
+    renderBillingStats();
 
     console.log('✅ Data loaded');
   } catch (err) {
@@ -477,6 +488,90 @@ function renderPrescriptions() {
       </tr>
     `;
   }).join('');
+}
+
+// ============================================
+// RENDER BILLING - STATS
+// ============================================
+function renderBillingStats() {
+  const sRev = document.getElementById('sTotalRevenue');
+  if (!sRev) return;
+  
+  const totalRevenue = invoices
+    .filter(i => i.status === 'paid')
+    .reduce((s, i) => s + (parseFloat(i.total) || 0), 0);
+  
+  const pending = invoices.filter(i => i.status === 'pending').length;
+  const paid = invoices.filter(i => i.status === 'paid').length;
+  const total = invoices.length;
+  
+  sRev.textContent = totalRevenue.toLocaleString();
+  document.getElementById('sPendingInvoices').textContent = pending;
+  document.getElementById('sPaidInvoices').textContent = paid;
+  document.getElementById('sTotalInvoices').textContent = total;
+}
+
+// ============================================
+// RENDER BILLING - INVOICES
+// ============================================
+function renderInvoices() {
+  const tb = document.getElementById('tInvoices');
+  if (!tb) return;
+  
+  if (!currentUser) {
+    tb.innerHTML = '<tr><td colspan="7" class="empty">Tafadhali ingia kwanza</td></tr>';
+    return;
+  }
+  
+  const q = (document.getElementById('searchInv').value || '').toLowerCase().trim();
+  const fStatus = document.getElementById('filterInvStatus').value;
+  const fPayment = document.getElementById('filterInvPayment').value;
+  
+  const list = invoices.filter(inv => {
+    if (q) {
+      const num = (inv.invoice_number || '').toLowerCase();
+      const pt = patients.find(p => p.id === inv.patient_id);
+      const ptName = pt ? pt.full_name.toLowerCase() : '';
+      if (!num.includes(q) && !ptName.includes(q)) return false;
+    }
+    if (fStatus && inv.status !== fStatus) return false;
+    if (fPayment && inv.payment_method !== fPayment) return false;
+    return true;
+  });
+  
+  document.getElementById('resultCountInv').textContent = `${list.length} of ${invoices.length} invoices`;
+  
+  if (list.length === 0) {
+    tb.innerHTML = '<tr><td colspan="7" class="empty">No invoices found</td></tr>';
+    return;
+  }
+  
+  tb.innerHTML = list.map(inv => {
+    const pt = patients.find(p => p.id === inv.patient_id);
+    const paymentIcons = { cash: '💵', mpesa: '📱', insurance: '🏥', card: '💳' };
+    
+    return `
+      <tr>
+        <td><strong style="color:#0284c7;">${esc(inv.invoice_number || '—')}</strong></td>
+        <td><strong>${esc(pt ? pt.full_name : '—')}</strong></td>
+        <td>${fmtDate(inv.created_at)}</td>
+        <td><strong>${parseFloat(inv.total || 0).toLocaleString()} TZS</strong></td>
+        <td>${paymentIcons[inv.payment_method] || ''} ${esc(inv.payment_method)}</td>
+        <td><span class="badge b-${inv.status}">${inv.status}</span></td>
+        <td>
+          <button class="btn-icon" onclick="viewInvoice(${inv.id})" title="View"><i class="fas fa-eye"></i></button>
+          <button class="btn-icon" onclick="delInvoice(${inv.id})" title="Delete"><i class="fas fa-trash"></i></button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function clearInvFilters() {
+  document.getElementById('searchInv').value = '';
+  document.getElementById('filterInvStatus').value = '';
+  document.getElementById('filterInvPayment').value = '';
+  renderInvoices();
 }
 
 // ============================================
@@ -746,6 +841,226 @@ async function delPrescription(id) {
   const { error } = await db.from('prescriptions').delete().eq('id', id);
   if (error) return toast(error.message, 'error');
   toast('Prescription deleted');
+  loadAll();
+}
+
+// ============================================
+// INVOICE CRUD
+// ============================================
+async function openInvoice() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  
+  document.getElementById('fInvoice').reset();
+  document.getElementById('inv_id').value = '';
+  
+  const ps = document.getElementById('inv_patient');
+  ps.innerHTML = '<option value="">— Select patient —</option>' + 
+    patients.map(p => `<option value="${p.id}">${padId(p.id)} - ${esc(p.full_name)}</option>`).join('');
+  
+  editingInvoiceItems = [];
+  addInvoiceItem();
+  
+  document.getElementById('mInvoiceTitle').textContent = 'New Invoice';
+  openM('mInvoice');
+}
+
+function addInvoiceItem() {
+  editingInvoiceItems.push({
+    description: '',
+    quantity: 1,
+    unit_price: 0
+  });
+  renderInvoiceItems();
+}
+
+function removeInvoiceItem(index) {
+  editingInvoiceItems.splice(index, 1);
+  if (editingInvoiceItems.length === 0) addInvoiceItem();
+  renderInvoiceItems();
+}
+
+function renderInvoiceItems() {
+  const container = document.getElementById('invoiceItems');
+  if (!container) return;
+  
+  container.innerHTML = editingInvoiceItems.map((item, i) => `
+    <div style="background:var(--gray-50); padding:0.85rem; border-radius:10px; margin-bottom:0.6rem; display:grid; grid-template-columns:2fr 0.6fr 1fr 1fr auto; gap:0.6rem; align-items:end;">
+      <div class="fg" style="gap:0.3rem;">
+        <label style="font-size:0.7rem;">Description</label>
+        <input type="text" value="${esc(item.description)}" oninput="updateInvoiceItem(${i}, 'description', this.value)" placeholder="e.g., Consultation" style="padding:0.5rem 0.7rem;">
+      </div>
+      <div class="fg" style="gap:0.3rem;">
+        <label style="font-size:0.7rem;">Qty</label>
+        <input type="number" value="${item.quantity}" min="1" oninput="updateInvoiceItem(${i}, 'quantity', this.value)" style="padding:0.5rem 0.7rem;">
+      </div>
+      <div class="fg" style="gap:0.3rem;">
+        <label style="font-size:0.7rem;">Unit Price</label>
+        <input type="number" value="${item.unit_price}" min="0" oninput="updateInvoiceItem(${i}, 'unit_price', this.value)" style="padding:0.5rem 0.7rem;">
+      </div>
+      <div class="fg" style="gap:0.3rem;">
+        <label style="font-size:0.7rem;">Amount</label>
+        <input type="text" value="${(item.quantity * item.unit_price).toLocaleString()}" readonly style="padding:0.5rem 0.7rem; background:white;">
+      </div>
+      <button type="button" class="btn-icon" onclick="removeInvoiceItem(${i})" title="Remove" style="margin-bottom:2px;">
+        <i class="fas fa-trash" style="color:var(--danger);"></i>
+      </button>
+    </div>
+  `).join('');
+  
+  calculateInvoiceTotal();
+}
+
+function updateInvoiceItem(index, field, value) {
+  if (!editingInvoiceItems[index]) return;
+  if (field === 'description') {
+    editingInvoiceItems[index][field] = value;
+  } else {
+    editingInvoiceItems[index][field] = parseFloat(value) || 0;
+  }
+  if (field !== 'description') renderInvoiceItems();
+}
+
+function calculateInvoiceTotal() {
+  const subtotal = editingInvoiceItems.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
+  const taxPercent = parseFloat(document.getElementById('inv_tax_percent').value) || 0;
+  const discount = parseFloat(document.getElementById('inv_discount').value) || 0;
+  const tax = subtotal * (taxPercent / 100);
+  const total = subtotal + tax - discount;
+  
+  document.getElementById('inv_subtotal').value = subtotal;
+  document.getElementById('inv_total_display').value = total.toLocaleString() + ' TZS';
+}
+
+async function saveInvoice() {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  
+  const patient_id = parseInt(document.getElementById('inv_patient').value);
+  if (!patient_id) { toast('Chagua mgonjwa', 'error'); return; }
+  
+  const validItems = editingInvoiceItems.filter(i => i.description.trim() && i.quantity > 0);
+  if (validItems.length === 0) { toast('Ongeza items angalau moja', 'error'); return; }
+  
+  const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
+  const taxPercent = parseFloat(document.getElementById('inv_tax_percent').value) || 0;
+  const discount = parseFloat(document.getElementById('inv_discount').value) || 0;
+  const tax = subtotal * (taxPercent / 100);
+  const total = subtotal + tax - discount;
+  
+  const invoiceNumber = 'INV-' + Date.now().toString().slice(-8);
+  
+  const invoiceData = {
+    invoice_number: invoiceNumber,
+    patient_id: patient_id,
+    subtotal: subtotal,
+    tax: tax,
+    discount: discount,
+    total: total,
+    payment_method: document.getElementById('inv_payment').value,
+    status: document.getElementById('inv_status').value,
+    notes: document.getElementById('inv_notes').value.trim() || null
+  };
+  
+  try {
+    const { data: inserted, error: invErr } = await db
+      .from('invoices')
+      .insert([invoiceData])
+      .select();
+    if (invErr) throw invErr;
+    
+    const invoiceId = inserted[0].id;
+    
+    const items = validItems.map(i => ({
+      invoice_id: invoiceId,
+      description: i.description,
+      quantity: i.quantity,
+      unit_price: i.unit_price,
+      amount: i.quantity * i.unit_price
+    }));
+    
+    const { error: itemsErr } = await db.from('invoice_items').insert(items);
+    if (itemsErr) throw itemsErr;
+    
+    toast('✅ Invoice ' + invoiceNumber + ' imeundwa');
+    closeM('mInvoice');
+    loadAll();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function viewInvoice(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  
+  const inv = invoices.find(x => x.id === id);
+  if (!inv) return;
+  
+  const pt = patients.find(p => p.id === inv.patient_id);
+  
+  const { data: items } = await db
+    .from('invoice_items')
+    .select('*')
+    .eq('invoice_id', id);
+  
+  const paymentIcons = { cash: '💵 Cash', mpesa: '📱 M-Pesa', insurance: '🏥 Insurance', card: '💳 Card' };
+  
+  document.getElementById('mViewInvoiceTitle').textContent = 'Invoice ' + (inv.invoice_number || '');
+  document.getElementById('viewInvoiceContent').innerHTML = `
+    <div style="text-align:center; padding-bottom:1rem; border-bottom:2px solid var(--gray-200); margin-bottom:1.5rem;">
+      <h2 style="font-size:1.3rem; color:var(--primary);">🏥 MediCare Hospital</h2>
+      <p style="color:var(--gray-500); font-size:0.85rem;">Dar es Salaam, Tanzania</p>
+    </div>
+    
+    <div class="detail-row"><strong>Invoice #</strong><span><strong>${esc(inv.invoice_number)}</strong></span></div>
+    <div class="detail-row"><strong>Date</strong><span>${fmtDate(inv.created_at)}</span></div>
+    <div class="detail-row"><strong>Patient</strong><span>${esc(pt ? pt.full_name : '—')}</span></div>
+    <div class="detail-row"><strong>Phone</strong><span>${esc(pt ? pt.phone : '—')}</span></div>
+    <div class="detail-row"><strong>Payment</strong><span>${paymentIcons[inv.payment_method] || inv.payment_method}</span></div>
+    <div class="detail-row"><strong>Status</strong><span><span class="badge b-${inv.status}">${inv.status}</span></span></div>
+    
+    <h4 style="margin:1.5rem 0 0.75rem;">Items</h4>
+    <table style="font-size:0.85rem;">
+      <thead>
+        <tr><th>Description</th><th>Qty</th><th>Price</th><th>Amount</th></tr>
+      </thead>
+      <tbody>
+        ${(items || []).map(i => `
+          <tr>
+            <td>${esc(i.description)}</td>
+            <td>${i.quantity}</td>
+            <td>${parseFloat(i.unit_price).toLocaleString()}</td>
+            <td><strong>${parseFloat(i.amount).toLocaleString()}</strong></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <div style="margin-top:1.5rem; padding:1rem; background:var(--gray-50); border-radius:10px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
+        <span>Subtotal:</span><span>${parseFloat(inv.subtotal).toLocaleString()} TZS</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
+        <span>Tax:</span><span>${parseFloat(inv.tax).toLocaleString()} TZS</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
+        <span>Discount:</span><span>-${parseFloat(inv.discount).toLocaleString()} TZS</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-weight:800; font-size:1.1rem; padding-top:0.6rem; border-top:2px solid var(--gray-200); color:var(--primary);">
+        <span>TOTAL:</span><span>${parseFloat(inv.total).toLocaleString()} TZS</span>
+      </div>
+    </div>
+    
+    ${inv.notes ? `<p style="margin-top:1rem; color:var(--gray-500); font-size:0.85rem;"><strong>Notes:</strong> ${esc(inv.notes)}</p>` : ''}
+  `;
+  
+  openM('mViewInvoice');
+}
+
+async function delInvoice(id) {
+  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
+  if (!confirm('Delete this invoice?')) return;
+  const { error } = await db.from('invoices').delete().eq('id', id);
+  if (error) return toast(error.message, 'error');
+  toast('Invoice deleted');
   loadAll();
 }
 
