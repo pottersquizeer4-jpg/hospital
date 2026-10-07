@@ -1,1104 +1,1294 @@
-// ============================================
-// SUPABASE INIT
-// ============================================
-const SUPABASE_URL = 'https://ypayivoloaccybdagpti.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_M1nxV_SvjG9Wp_R2NDZNog_xGoW1C2A';
-
-const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-console.log('🏥 MediCare Hospital started');
-
-let patients = [];
-let doctors = [];
-let appts = [];
-let prescriptions = [];
-let invoices = [];
-let editingInvoiceItems = [];
-let currentUser = null;
-let currentUserRole = null;
-let authMode = 'signin';
-
-// ============================================
-// HELPERS
-// ============================================
-function toast(msg, type = 'success') {
-  const t = document.createElement('div');
-  t.className = 'toast ' + type;
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3500);
-}
-
-function esc(s) {
-  return s ? String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) : '';
-}
-
-function fmt(d) {
-  return d ? new Date(d).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' }) : '—';
-}
-
-function fmtDate(d) {
-  return d ? new Date(d).toLocaleDateString('en-GB', { dateStyle: 'medium' }) : '—';
-}
-
-function padId(id) {
-  return '#' + String(id).padStart(4, '0');
-}
-
-function initials(name) {
-  if (!name) return '?';
-  return name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase();
-}
-
-// ============================================
-// NAVIGATION
-// ============================================
-document.querySelectorAll('.nav-btn').forEach(b => {
-  b.onclick = () => go(b.dataset.page);
-});
-
-function go(page) {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('page-' + page).classList.add('active');
-  document.querySelector(`.nav-btn[data-page="${page}"]`).classList.add('active');
-}
-
-function openM(id) { document.getElementById(id).classList.add('show'); }
-function closeM(id) { document.getElementById(id).classList.remove('show'); }
-
-document.querySelectorAll('.modal-bg').forEach(m => {
-  m.onclick = e => { if (e.target === m) m.classList.remove('show'); };
-});
-
-// ============================================
-// AUTHENTICATION
-// ============================================
-async function initAuth() {
-  const { data: { session } } = await db.auth.getSession();
-  currentUser = session ? session.user : null;
-  await updateUserUI();
-
-  db.auth.onAuthStateChange(async (_event, session) => {
-    currentUser = session ? session.user : null;
-    await updateUserUI();
-  });
-}
-
-async function updateUserUI() {
-  const label = document.getElementById('userLabel');
-  const emailEl = document.getElementById('userMenuEmail');
-  const roleEl = document.getElementById('userMenuRole');
-  const welcome = document.getElementById('welcomeMsg');
-
-  if (currentUser) {
-    const { data } = await db.from('user_profiles')
-      .select('full_name, role')
-      .eq('id', currentUser.id)
-      .single();
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏥</text></svg>">
+  <title>MediCare · Hospital Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     
-    currentUserRole = data ? data.role : null;
-    const fullName = data ? data.full_name : currentUser.email.split('@')[0];
-    
-    label.textContent = fullName;
-    emailEl.textContent = currentUser.email;
-    roleEl.textContent = (currentUserRole || 'user').toUpperCase();
-    if (welcome) welcome.textContent = 'Karibu, ' + fullName + ' (' + (currentUserRole || 'user') + ')';
-    
-    loadAll();
-  } else {
-    currentUserRole = null;
-    label.textContent = 'Sign In';
-    emailEl.textContent = '—';
-    roleEl.textContent = '—';
-    if (welcome) welcome.textContent = 'Karibu MediCare Hospital';
-    
-    patients = [];
-    doctors = [];
-    appts = [];
-    prescriptions = [];
-    invoices = [];
-    editingInvoiceItems = [];
-    renderPatients();
-    renderDoctors();
-    renderAppts();
-    renderRecent();
-    renderPrescriptions();
-    renderInvoices();
-    renderBillingStats();
-    
-    ['sPatients', 'sDoctors', 'sAppts', 'sPending'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = '—';
-    });
-    
-    setTimeout(() => openAuth(), 300);
-  }
-}
-
-function handleUserClick() {
-  if (currentUser) {
-    document.getElementById('userMenu').classList.toggle('show');
-  } else {
-    openAuth();
-  }
-}
-
-function openAuth() {
-  document.getElementById('mAuth').classList.add('show');
-  switchAuthTab('signin');
-}
-
-function switchAuthTab(mode) {
-  authMode = mode;
-  const isSignIn = mode === 'signin';
-  
-  const tabSignIn = document.getElementById('tabSignIn');
-  const tabSignUp = document.getElementById('tabSignUp');
-  
-  tabSignIn.classList.toggle('active', isSignIn);
-  tabSignUp.classList.toggle('active', !isSignIn);
-  
-  document.getElementById('signupNameField').style.display = isSignIn ? 'none' : 'block';
-  document.getElementById('signupRoleField').style.display = isSignIn ? 'none' : 'block';
-  document.getElementById('authTitle').textContent = isSignIn ? 'Sign In' : 'Create Account';
-  document.getElementById('authSubmitBtn').innerHTML = isSignIn 
-    ? '<i class="fas fa-sign-in-alt"></i> Sign In' 
-    : '<i class="fas fa-user-plus"></i> Create Account';
-}
-
-async function submitAuth() {
-  const email = document.getElementById('a_email').value.trim();
-  const password = document.getElementById('a_password').value;
-  const name = document.getElementById('a_name').value.trim();
-  const role = document.getElementById('a_role').value;
-
-  if (!email || !password) { toast('Jaza email na password', 'error'); return; }
-  if (password.length < 6) { toast('Password iwe angalau 6 characters', 'error'); return; }
-  if (authMode === 'signup' && !name) { toast('Jaza jina lako', 'error'); return; }
-
-  const btn = document.getElementById('authSubmitBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inafanya kazi...';
-
-  try {
-    if (authMode === 'signup') {
-      const { data, error } = await db.auth.signUp({ email, password });
-      if (error) throw error;
-      if (data.user) {
-        await db.from('user_profiles').insert([{
-          id: data.user.id,
-          full_name: name,
-          role: role
-        }]);
-      }
-      toast('✅ Account imeundwa! Karibu!');
-    } else {
-      const { error } = await db.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      toast('✅ Karibu tena!');
+    :root {
+      --primary: #0ea5e9;
+      --primary-dark: #0284c7;
+      --secondary: #0f172a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --gray-50: #f8fafc;
+      --gray-100: #f1f5f9;
+      --gray-200: #e2e8f0;
+      --gray-300: #cbd5e1;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-700: #334155;
+      --gray-900: #0f172a;
     }
-    closeM('mAuth');
-    document.getElementById('a_name').value = '';
-    document.getElementById('a_email').value = '';
-    document.getElementById('a_password').value = '';
-  } catch (err) {
-    let msg = err.message;
-    if (msg.includes('Invalid login')) msg = 'Email au password si sahihi';
-    if (msg.includes('already registered')) msg = 'Email tayari imesajiliwa';
-    toast(msg, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = authMode === 'signin' 
-      ? '<i class="fas fa-sign-in-alt"></i> Sign In' 
-      : '<i class="fas fa-user-plus"></i> Create Account';
-  }
-}
-
-async function signOut() {
-  if (!confirm('Sign out?')) return;
-  await db.auth.signOut();
-  document.getElementById('userMenu').classList.remove('show');
-  toast('Umetoka');
-}
-
-document.addEventListener('click', (e) => {
-  const menu = document.getElementById('userMenu');
-  const btn = document.getElementById('userBtn');
-  if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
-    menu.classList.remove('show');
-  }
-});
-
-// ============================================
-// LOAD ALL DATA
-// ============================================
-async function loadAll() {
-  if (!currentUser) return;
-  
-  console.log('📊 Loading data...');
-  try {
-    const [p, d, a, pend] = await Promise.all([
-      db.from('patients').select('*', { count: 'exact', head: true }),
-      db.from('doctors').select('*', { count: 'exact', head: true }),
-      db.from('appointments').select('*', { count: 'exact', head: true }),
-      db.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'pending')
-    ]);
-    document.getElementById('sPatients').textContent = p.count ?? 0;
-    document.getElementById('sDoctors').textContent = d.count ?? 0;
-    document.getElementById('sAppts').textContent = a.count ?? 0;
-    document.getElementById('sPending').textContent = pend.count ?? 0;
-
-    const { data: pd } = await db.from('patients').select('*').order('created_at', { ascending: false });
-    patients = pd || [];
-    renderPatients();
-
-    const { data: dd } = await db.from('doctors').select('*').order('full_name');
-    doctors = dd || [];
-    renderDoctors();
-
-    const { data: ad } = await db.from('appointments').select('*').order('appointment_date', { ascending: false });
-    appts = ad || [];
-    renderAppts();
-    renderRecent();
-
-    const { data: rxd } = await db.from('prescriptions').select('*').order('prescribed_at', { ascending: false });
-    prescriptions = rxd || [];
-    renderPrescriptions();
-
-    const { data: invd } = await db.from('invoices').select('*').order('created_at', { ascending: false });
-    invoices = invd || [];
-    renderInvoices();
-    renderBillingStats();
-
-    console.log('✅ Data loaded');
-  } catch (err) {
-    console.error('Load error:', err);
-    toast('Error loading data: ' + err.message, 'error');
-  }
-}
-
-// ============================================
-// RENDER PATIENTS
-// ============================================
-function renderPatients() {
-  const tb = document.getElementById('tPatients');
-  if (!tb) return;
-  if (!currentUser) {
-    tb.innerHTML = '<tr><td colspan="8" class="empty">Tafadhali ingia kwanza</td></tr>';
-    return;
-  }
-
-  const q = (document.getElementById('searchP').value || '').toLowerCase().trim();
-  const fGender = document.getElementById('filterGender').value;
-  const fBlood = document.getElementById('filterBlood').value;
-
-  const list = patients.filter(p => {
-    if (q) {
-      const idStr = padId(p.id).toLowerCase();
-      const idNum = String(p.id);
-      const name = (p.full_name || '').toLowerCase();
-      const email = (p.email || '').toLowerCase();
-      if (!idStr.includes(q) && !idNum.includes(q) && !name.includes(q) && !email.includes(q)) return false;
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--gray-100);
+      color: var(--gray-900);
+      -webkit-font-smoothing: antialiased;
     }
-    if (fGender && p.gender !== fGender) return false;
-    if (fBlood && p.blood_group !== fBlood) return false;
-    return true;
-  });
 
-  document.getElementById('resultCountP').textContent = `${list.length} of ${patients.length} patients`;
+    .app {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
 
-  if (list.length === 0) {
-    tb.innerHTML = '<tr><td colspan="8" class="empty">No patients found</td></tr>';
-    return;
-  }
+    /* TOP BAR */
+    .top-bar {
+      grid-column: 1 / -1;
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      padding: 0.85rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
 
-  tb.innerHTML = list.map(p => `
-    <tr>
-      <td><strong style="color:#0284c7;">${padId(p.id)}</strong></td>
-      <td>
-        <div class="user-cell">
-          <div class="avatar">${initials(p.full_name)}</div>
+    .top-bar-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      color: var(--gray-500);
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .top-bar-left i { color: var(--primary); font-size: 1.1rem; }
+
+    .user-area { position: relative; }
+
+    .user-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 1rem;
+      border: 1.5px solid var(--gray-200);
+      background: white;
+      border-radius: 12px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.15s;
+      color: var(--gray-900);
+    }
+
+    .user-btn:hover { border-color: var(--primary); color: var(--primary); }
+    .user-btn i { font-size: 1.2rem; color: var(--primary); }
+
+    .user-menu {
+      position: absolute;
+      top: 55px;
+      right: 0;
+      background: white;
+      border: 1.5px solid var(--gray-200);
+      border-radius: 14px;
+      padding: 0.5rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+      min-width: 240px;
+      display: none;
+      z-index: 100;
+    }
+
+    .user-menu.show { display: block; animation: fadeIn 0.15s; }
+
+    .user-menu-email {
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--gray-900);
+      border-bottom: 1px solid var(--gray-200);
+      word-break: break-all;
+    }
+
+    .user-menu-role {
+      padding: 0.5rem 1rem;
+      font-size: 0.72rem;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--gray-200);
+      font-weight: 600;
+    }
+
+    .user-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: 8px;
+      transition: all 0.15s;
+      color: var(--gray-900);
+      font-weight: 500;
+    }
+
+    .user-menu-item:hover { background: var(--gray-100); }
+    .user-menu-item i { color: var(--primary); width: 20px; }
+
+    /* SIDEBAR */
+    .side {
+      background: var(--secondary);
+      color: white;
+      padding: 1.5rem 1rem;
+      height: calc(100vh - 60px);
+      position: sticky;
+      top: 60px;
+      overflow-y: auto;
+    }
+
+    .logo {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      padding: 0.5rem 0.75rem 1.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 1.5rem;
+    }
+
+    .logo i {
+      background: var(--primary);
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      box-shadow: 0 4px 12px rgba(14, 165, 233, 0.4);
+    }
+
+    .logo h1 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.02em; }
+    .logo p { font-size: 0.68rem; color: var(--gray-400); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 0.15rem; }
+
+    .nav-label {
+      font-size: 0.68rem;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 600;
+      padding: 0 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .nav-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      width: 100%;
+      padding: 0.7rem 0.75rem;
+      border: none;
+      background: none;
+      color: var(--gray-300);
+      cursor: pointer;
+      border-radius: 10px;
+      margin-bottom: 0.2rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      text-align: left;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+
+    .nav-btn:hover { background: rgba(255,255,255,0.06); color: white; }
+    .nav-btn.active { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(14, 165, 233, 0.35); }
+    .nav-btn i { width: 18px; text-align: center; font-size: 0.95rem; }
+
+    /* MAIN */
+    .main { padding: 2rem 2.5rem; overflow-x: hidden; }
+
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 2rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .page-head h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.3rem; }
+    .page-head .sub { color: var(--gray-500); font-size: 0.88rem; }
+
+    /* STATS */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 2rem;
+    }
+
+    .stat {
+      background: white;
+      padding: 1.4rem;
+      border-radius: 16px;
+      border: 1px solid var(--gray-200);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      transition: all 0.2s;
+    }
+
+    .stat:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.06); }
+
+    .stat-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.35rem;
+      flex-shrink: 0;
+    }
+
+    .stat-icon.blue { background: #dbeafe; color: #0284c7; }
+    .stat-icon.green { background: #d1fae5; color: #059669; }
+    .stat-icon.amber { background: #fef3c7; color: #d97706; }
+    .stat-icon.purple { background: #ede9fe; color: #7c3aed; }
+    .stat-icon.red { background: #fee2e2; color: #dc2626; }
+
+    .stat-num { font-size: 1.65rem; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+    .stat-label { color: var(--gray-500); font-size: 0.82rem; margin-top: 0.3rem; font-weight: 500; }
+
+    /* CARD */
+    .card {
+      background: white;
+      border-radius: 16px;
+      border: 1px solid var(--gray-200);
+      overflow: hidden;
+      margin-bottom: 1.5rem;
+    }
+
+    .card-head {
+      padding: 1.2rem 1.5rem;
+      border-bottom: 1px solid var(--gray-200);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .card-head h3 { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; }
+
+    /* BUTTONS */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.2rem;
+      border-radius: 10px;
+      border: none;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 4px 12px rgba(14, 165, 233, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(14, 165, 233, 0.35);
+    }
+
+    .btn-outline {
+      background: white;
+      color: var(--gray-700);
+      border: 1.5px solid var(--gray-200);
+    }
+
+    .btn-outline:hover { background: var(--gray-50); border-color: var(--gray-300); }
+    .btn-sm { padding: 0.45rem 0.8rem; font-size: 0.78rem; border-radius: 8px; }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.75rem;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      margin-right: 0.3rem;
+      transition: all 0.15s;
+    }
+
+    .btn-danger:hover { background: #dc2626; }
+
+    .btn-icon {
+      background: none;
+      border: none;
+      padding: 0.4rem;
+      cursor: pointer;
+      color: var(--gray-400);
+      border-radius: 6px;
+      transition: all 0.15s;
+    }
+
+    .btn-icon:hover { background: var(--gray-100); color: var(--gray-900); }
+
+    /* TABLE */
+    .table-wrap { overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+
+    thead { background: var(--gray-50); }
+
+    th {
+      text-align: left;
+      padding: 0.85rem 1rem;
+      font-weight: 600;
+      color: var(--gray-700);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--gray-200);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 0.95rem 1rem;
+      border-bottom: 1px solid var(--gray-100);
+      color: var(--gray-700);
+      vertical-align: middle;
+    }
+
+    tbody tr:hover { background: var(--gray-50); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .empty { text-align: center; padding: 2.5rem 1rem; color: var(--gray-400); font-size: 0.9rem; }
+
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: #dbeafe;
+      color: var(--primary-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .user-cell { display: flex; align-items: center; gap: 0.7rem; }
+    .user-cell .name { font-weight: 600; color: var(--gray-900); }
+    .user-cell .email { color: var(--gray-500); font-size: 0.78rem; }
+
+    /* BADGES */
+    .badge {
+      display: inline-block;
+      padding: 0.28rem 0.7rem;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: capitalize;
+    }
+
+    .b-pending { background: #fef3c7; color: #92400e; }
+    .b-confirmed { background: #dbeafe; color: #1e40af; }
+    .b-completed, .b-paid { background: #d1fae5; color: #065f46; }
+    .b-cancelled { background: #fee2e2; color: #991b1b; }
+    .b-partial { background: #e0e7ff; color: #3730a3; }
+
+    /* MODAL */
+    .modal-bg {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+
+    .modal-bg.show { display: flex; animation: fadeIn 0.2s; }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .modal {
+      background: white;
+      border-radius: 20px;
+      max-width: 600px;
+      width: 100%;
+      max-height: 92vh;
+      overflow-y: auto;
+      padding: 2rem;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.3);
+      animation: slideUp 0.25s;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .modal-head h3 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+
+    .close-x {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: var(--gray-400);
+      cursor: pointer;
+      padding: 0.2rem 0.5rem;
+      border-radius: 8px;
+      line-height: 1;
+      transition: all 0.15s;
+    }
+
+    .close-x:hover { background: var(--gray-100); color: var(--gray-900); }
+
+    /* AUTH TABS */
+    .auth-tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1.5px solid var(--gray-200);
+    }
+
+    .auth-tab {
+      flex: 1;
+      padding: 0.75rem;
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 0.9rem;
+      cursor: pointer;
+      color: var(--gray-500);
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1.5px;
+      transition: all 0.15s;
+    }
+
+    .auth-tab.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    /* FORM */
+    .fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .fg { display: flex; flex-direction: column; gap: 0.4rem; }
+    .fg.full { grid-column: span 2; }
+    .fg label { font-size: 0.83rem; font-weight: 600; color: var(--gray-700); }
+
+    .fg input, .fg select, .fg textarea {
+      padding: 0.7rem 1rem;
+      border: 1.5px solid var(--gray-200);
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      outline: none;
+      background: var(--gray-50);
+      transition: all 0.15s;
+      width: 100%;
+    }
+
+    .fg input:focus, .fg select:focus, .fg textarea:focus {
+      border-color: var(--primary);
+      background: white;
+      box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12);
+    }
+
+    .fg textarea { resize: vertical; min-height: 70px; }
+
+    .fg input[readonly] {
+      background: var(--gray-100);
+      color: var(--primary-dark);
+      font-weight: 700;
+      cursor: not-allowed;
+    }
+
+    .modal-foot {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.7rem;
+      margin-top: 1.5rem;
+      padding-top: 1.2rem;
+      border-top: 1px solid var(--gray-200);
+    }
+
+    /* TOAST */
+    .toast {
+      position: fixed;
+      top: 1.5rem;
+      right: 1.5rem;
+      padding: 1rem 1.3rem;
+      border-radius: 12px;
+      color: white;
+      font-weight: 600;
+      font-size: 0.9rem;
+      z-index: 200;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+      animation: slide 0.3s;
+    }
+
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
+
+    @keyframes slide {
+      from { transform: translateX(400px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* PAGE */
+    .page { display: none; }
+    .page.active { display: block; animation: fadeIn 0.2s; }
+
+    /* SEARCH */
+    .search {
+      padding: 0.6rem 1rem;
+      border: 1.5px solid var(--gray-200);
+      border-radius: 10px;
+      font-size: 0.88rem;
+      font-family: inherit;
+      outline: none;
+      background: var(--gray-50);
+      transition: all 0.15s;
+      min-width: 200px;
+    }
+
+    .search:focus { border-color: var(--primary); background: white; box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12); }
+
+    /* FILTERS */
+    .filter-bar {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 0 1.5rem 1rem;
+    }
+
+    .filter-bar select {
+      padding: 0.5rem 0.8rem;
+      border: 1.5px solid var(--gray-200);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      outline: none;
+      background: var(--gray-50);
+    }
+
+    .filter-bar select:focus { border-color: var(--primary); background: white; }
+
+    /* VIEW DETAILS */
+    .detail-row {
+      display: flex;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--gray-100);
+      font-size: 0.9rem;
+    }
+
+    .detail-row:last-child { border-bottom: none; }
+    .detail-row strong { min-width: 150px; color: var(--gray-500); font-weight: 600; }
+    .detail-row span { color: var(--gray-900); }
+
+    /* LOADING */
+    .loading {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--gray-400);
+      font-size: 0.9rem;
+    }
+
+    .loading i {
+      font-size: 1.5rem;
+      animation: spin 1s linear infinite;
+      display: block;
+      margin-bottom: 0.5rem;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* RESPONSIVE */
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .side { position: relative; height: auto; top: 0; }
+      .main { padding: 1.5rem; }
+      .fgrid { grid-template-columns: 1fr; }
+      .fg.full { grid-column: span 1; }
+      .top-bar { padding: 0.7rem 1rem; }
+    }
+
+    @media (max-width: 600px) {
+      .stats { grid-template-columns: 1fr 1fr; }
+      .page-head h2 { font-size: 1.4rem; }
+      .card-head { flex-direction: column; align-items: stretch; }
+      .search { width: 100%; }
+      .modal { padding: 1.5rem; }
+    }
+
+    /* PRINT */
+    @media print {
+      .side, .btn, .search, .filter-bar, .nav-btn, .top-bar, .modal-foot { display: none !important; }
+      .main { padding: 1rem; }
+      .card { border: 1px solid #ccc; box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- TOP BAR -->
+    <div class="top-bar">
+      <div class="top-bar-left">
+        <i class="fas fa-shield-halved"></i>
+        <span id="welcomeMsg">Karibu MediCare Hospital</span>
+      </div>
+      <div class="user-area">
+        <button class="user-btn" id="userBtn" onclick="handleUserClick()">
+          <i class="fas fa-user-circle"></i>
+          <span id="userLabel">Sign In</span>
+        </button>
+        <div class="user-menu" id="userMenu">
+          <div class="user-menu-email" id="userMenuEmail">—</div>
+          <div class="user-menu-role" id="userMenuRole">—</div>
+          <button class="user-menu-item" onclick="signOut()">
+            <i class="fas fa-sign-out-alt"></i> Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SIDEBAR -->
+    <aside class="side">
+      <div class="logo">
+        <i class="fas fa-hospital"></i>
+        <div><h1>MediCare</h1><p>HOSPITAL</p></div>
+      </div>
+      <div class="nav-label">Main Menu</div>
+      <button class="nav-btn active" data-page="dashboard"><i class="fas fa-chart-pie"></i> Dashboard</button>
+      <button class="nav-btn" data-page="patients"><i class="fas fa-users"></i> Patients</button>
+      <button class="nav-btn" data-page="doctors"><i class="fas fa-user-md"></i> Doctors</button>
+      <button class="nav-btn" data-page="appointments"><i class="fas fa-calendar-check"></i> Appointments</button>
+      <button class="nav-btn" data-page="prescriptions"><i class="fas fa-prescription"></i> Prescriptions</button>
+      <button class="nav-btn" data-page="billing"><i class="fas fa-file-invoice-dollar"></i> Billing</button>
+    </aside>
+
+    <main class="main">
+      <!-- DASHBOARD -->
+      <section class="page active" id="page-dashboard">
+        <div class="page-head">
           <div>
-            <div class="name">${esc(p.full_name)}</div>
-            <div class="email">${esc(p.email || '')}</div>
+            <h2>Dashboard</h2>
+            <p class="sub">Welcome back! Here's your hospital overview.</p>
           </div>
         </div>
-      </td>
-      <td>${esc(p.email || '—')}</td>
-      <td>${esc(p.phone || '—')}</td>
-      <td>${esc(p.gender || '—')}</td>
-      <td>${esc(p.blood_group || '—')}</td>
-      <td>${fmtDate(p.registered_at || p.created_at)}</td>
-      <td>
-        <button class="btn-icon" onclick="viewPatient(${p.id})" title="View"><i class="fas fa-eye"></i></button>
-        <button class="btn-icon" onclick="editPatient(${p.id})" title="Edit"><i class="fas fa-pen"></i></button>
-        <button class="btn-icon" onclick="delPatient(${p.id})" title="Delete"><i class="fas fa-trash"></i></button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function clearFilters() {
-  document.getElementById('searchP').value = '';
-  document.getElementById('filterGender').value = '';
-  document.getElementById('filterBlood').value = '';
-  renderPatients();
-}
-
-// ============================================
-// RENDER DOCTORS
-// ============================================
-function renderDoctors() {
-  const tb = document.getElementById('tDoctors');
-  if (!tb) return;
-  if (!currentUser) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty">Tafadhali ingia kwanza</td></tr>';
-    return;
-  }
-  if (doctors.length === 0) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty">No doctors found</td></tr>';
-    return;
-  }
-  tb.innerHTML = doctors.map(d => `
-    <tr>
-      <td>
-        <div class="user-cell">
-          <div class="avatar">${initials(d.full_name)}</div>
-          <div>
-            <div class="name">${esc(d.full_name)}</div>
-            <div class="email">${esc(d.email || '')}</div>
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-icon blue"><i class="fas fa-users"></i></div>
+            <div>
+              <div class="stat-num" id="sPatients">—</div>
+              <div class="stat-label">Total Patients</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon green"><i class="fas fa-user-md"></i></div>
+            <div>
+              <div class="stat-num" id="sDoctors">—</div>
+              <div class="stat-label">Doctors</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon amber"><i class="fas fa-calendar-check"></i></div>
+            <div>
+              <div class="stat-num" id="sAppts">—</div>
+              <div class="stat-label">Appointments</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon purple"><i class="fas fa-clock"></i></div>
+            <div>
+              <div class="stat-num" id="sPending">—</div>
+              <div class="stat-label">Pending</div>
+            </div>
           </div>
         </div>
-      </td>
-      <td>${esc(d.specialization || '—')}</td>
-      <td>${esc(d.license_number || '—')}</td>
-      <td>${d.years_experience || 0} yrs</td>
-      <td>${(d.consultation_fee || 0).toLocaleString()} TZS</td>
-      <td>
-        <button class="btn-icon" onclick="editDoctor(${d.id})" title="Edit"><i class="fas fa-pen"></i></button>
-        <button class="btn-icon" onclick="delDoctor(${d.id})" title="Delete"><i class="fas fa-trash"></i></button>
-      </td>
-    </tr>
-  `).join('');
-}
+        <div class="card">
+          <div class="card-head">
+            <h3>Recent Appointments</h3>
+            <button class="btn btn-outline btn-sm" onclick="go('appointments')">View all <i class="fas fa-arrow-right"></i></button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Patient</th><th>Doctor</th><th>Date</th><th>Status</th></tr></thead>
+              <tbody id="tRecent"><tr><td colspan="4" class="empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-// ============================================
-// RENDER APPOINTMENTS
-// ============================================
-function renderAppts() {
-  const tb = document.getElementById('tAppts');
-  if (!tb) return;
-  if (!currentUser) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty">Tafadhali ingia kwanza</td></tr>';
-    return;
-  }
-  if (appts.length === 0) {
-    tb.innerHTML = '<tr><td colspan="6" class="empty">No appointments found</td></tr>';
-    return;
-  }
-  tb.innerHTML = appts.map(a => {
-    const pt = patients.find(p => p.id === a.patient_id);
-    const dr = doctors.find(d => d.id === a.doctor_id);
-    return `
-      <tr>
-        <td><strong>${esc(pt ? pt.full_name : '—')}</strong></td>
-        <td>${esc(dr ? dr.full_name : '—')}</td>
-        <td>${fmt(a.appointment_date)}</td>
-        <td>${esc(a.reason || '—')}</td>
-        <td><span class="badge b-${a.status}">${a.status}</span></td>
-        <td>
-          <button class="btn-icon" onclick="delAppt(${a.id})" title="Delete"><i class="fas fa-trash"></i></button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
+      <!-- PATIENTS -->
+      <section class="page" id="page-patients">
+        <div class="page-head">
+          <div>
+            <h2>Patients</h2>
+            <p class="sub">Manage all registered patients</p>
+          </div>
+          <div style="display:flex; gap:0.6rem; flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="exportPatientsCSV()"><i class="fas fa-file-csv"></i> Export CSV</button>
+            <button class="btn btn-outline" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+            <button class="btn btn-primary" onclick="openPatient()"><i class="fas fa-plus"></i> Add Patient</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <input type="text" class="search" id="searchP" placeholder="Search by ID, name, or email..." oninput="renderPatients()">
+            <span id="resultCountP" style="margin-left:auto; font-size:0.85rem; color:var(--gray-500); font-weight:600;"></span>
+          </div>
+          <div class="filter-bar">
+            <label style="font-weight:600; font-size:0.85rem; color:var(--gray-700);">Filter:</label>
+            <select id="filterGender" onchange="renderPatients()">
+              <option value="">All Genders</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+            <select id="filterBlood" onchange="renderPatients()">
+              <option value="">All Blood Groups</option>
+              <option>A+</option><option>A-</option>
+              <option>B+</option><option>B-</option>
+              <option>AB+</option><option>AB-</option>
+              <option>O+</option><option>O-</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearFilters()"><i class="fas fa-times"></i> Clear</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Gender</th><th>Blood</th><th>Registered</th><th>Actions</th></tr></thead>
+              <tbody id="tPatients"><tr><td colspan="8" class="empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-function renderRecent() {
-  const tb = document.getElementById('tRecent');
-  if (!tb) return;
-  if (!currentUser) {
-    tb.innerHTML = '<tr><td colspan="4" class="empty">Tafadhali ingia kwanza</td></tr>';
-    return;
-  }
-  const recent = appts.slice(0, 5);
-  if (recent.length === 0) {
-    tb.innerHTML = '<tr><td colspan="4" class="empty">No appointments yet</td></tr>';
-    return;
-  }
-  tb.innerHTML = recent.map(a => {
-    const pt = patients.find(p => p.id === a.patient_id);
-    const dr = doctors.find(d => d.id === a.doctor_id);
-    return `
-      <tr>
-        <td><strong>${esc(pt ? pt.full_name : '—')}</strong></td>
-        <td>${esc(dr ? dr.full_name : '—')}</td>
-        <td>${fmt(a.appointment_date)}</td>
-        <td><span class="badge b-${a.status}">${a.status}</span></td>
-      </tr>
-    `;
-  }).join('');
-}
+      <!-- DOCTORS -->
+      <section class="page" id="page-doctors">
+        <div class="page-head">
+          <div>
+            <h2>Doctors</h2>
+            <p class="sub">Manage all medical staff</p>
+          </div>
+          <button class="btn btn-primary" onclick="openDoctor()"><i class="fas fa-plus"></i> Add Doctor</button>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Name</th><th>Specialization</th><th>License</th><th>Experience</th><th>Fee</th><th>Actions</th></tr></thead>
+              <tbody id="tDoctors"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-// ============================================
-// RENDER PRESCRIPTIONS
-// ============================================
-function renderPrescriptions() {
-  const tb = document.getElementById('tPrescriptions');
-  if (!tb) return;
+      <!-- APPOINTMENTS -->
+      <section class="page" id="page-appointments">
+        <div class="page-head">
+          <div>
+            <h2>Appointments</h2>
+            <p class="sub">Schedule and manage appointments</p>
+          </div>
+          <button class="btn btn-primary" onclick="openAppt()"><i class="fas fa-plus"></i> New Appointment</button>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Patient</th><th>Doctor</th><th>Date</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="tAppts"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-  if (!currentUser) {
-    tb.innerHTML = '<tr><td colspan="8" class="empty">Tafadhali ingia kwanza</td></tr>';
-    return;
-  }
+      <!-- PRESCRIPTIONS -->
+      <section class="page" id="page-prescriptions">
+        <div class="page-head">
+          <div>
+            <h2>Prescriptions</h2>
+            <p class="sub">Manage patient prescriptions</p>
+          </div>
+          <button class="btn btn-primary" onclick="openPrescription()"><i class="fas fa-plus"></i> New Prescription</button>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <input type="text" class="search" id="searchRx" placeholder="Search by patient, medicine..." oninput="renderPrescriptions()">
+            <span id="resultCountRx" style="margin-left:auto; font-size:0.85rem; color:var(--gray-500); font-weight:600;"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Patient</th><th>Doctor</th><th>Medicine</th><th>Dosage</th>
+                  <th>Frequency</th><th>Duration</th><th>Prescribed</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tPrescriptions">
+                <tr><td colspan="8" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
-  const q = (document.getElementById('searchRx').value || '').toLowerCase().trim();
-  const list = prescriptions.filter(rx => {
-    if (!q) return true;
-    const pt = patients.find(p => p.id === rx.patient_id);
-    const ptName = pt ? pt.full_name.toLowerCase() : '';
-    const medName = (rx.medicine_name || '').toLowerCase();
-    return ptName.includes(q) || medName.includes(q);
-  });
+      <!-- BILLING -->
+      <section class="page" id="page-billing">
+        <div class="page-head">
+          <div>
+            <h2>Billing</h2>
+            <p class="sub">Manage invoices and payments</p>
+          </div>
+          <button class="btn btn-primary" onclick="openInvoice()"><i class="fas fa-plus"></i> New Invoice</button>
+        </div>
 
-  document.getElementById('resultCountRx').textContent = `${list.length} of ${prescriptions.length} prescriptions`;
+        <div class="stats">
+          <div class="stat">
+            <div class="stat-icon green"><i class="fas fa-dollar-sign"></i></div>
+            <div>
+              <div class="stat-num" id="sTotalRevenue">—</div>
+              <div class="stat-label">Total Revenue (TZS)</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon amber"><i class="fas fa-clock"></i></div>
+            <div>
+              <div class="stat-num" id="sPendingInvoices">—</div>
+              <div class="stat-label">Pending</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon blue"><i class="fas fa-check-circle"></i></div>
+            <div>
+              <div class="stat-num" id="sPaidInvoices">—</div>
+              <div class="stat-label">Paid</div>
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-icon purple"><i class="fas fa-file-invoice"></i></div>
+            <div>
+              <div class="stat-num" id="sTotalInvoices">—</div>
+              <div class="stat-label">Total Invoices</div>
+            </div>
+          </div>
+        </div>
 
-  if (list.length === 0) {
-    tb.innerHTML = '<tr><td colspan="8" class="empty">No prescriptions found</td></tr>';
-    return;
-  }
+        <div class="card">
+          <div class="card-head">
+            <input type="text" class="search" id="searchInv" placeholder="Search by invoice #, patient..." oninput="renderInvoices()">
+            <span id="resultCountInv" style="margin-left:auto; font-size:0.85rem; color:var(--gray-500); font-weight:600;"></span>
+          </div>
+          <div class="filter-bar">
+            <label style="font-weight:600; font-size:0.85rem; color:var(--gray-700);">Filter:</label>
+            <select id="filterInvStatus" onchange="renderInvoices()">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <select id="filterInvPayment" onchange="renderInvoices()">
+              <option value="">All Payment Methods</option>
+              <option value="cash">Cash</option>
+              <option value="mpesa">M-Pesa</option>
+              <option value="insurance">Insurance</option>
+              <option value="card">Card</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearInvFilters()"><i class="fas fa-times"></i> Clear</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Invoice #</th><th>Patient</th><th>Date</th><th>Total</th>
+                  <th>Payment</th><th>Status</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tInvoices">
+                <tr><td colspan="7" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 
-  tb.innerHTML = list.map(rx => {
-    const pt = patients.find(p => p.id === rx.patient_id);
-    const dr = doctors.find(d => d.id === rx.doctor_id);
-    return `
-      <tr>
-        <td><strong>${esc(pt ? pt.full_name : '—')}</strong></td>
-        <td>${esc(dr ? dr.full_name : '—')}</td>
-        <td><strong style="color:#0284c7;">${esc(rx.medicine_name)}</strong></td>
-        <td>${esc(rx.dosage || '—')}</td>
-        <td>${esc(rx.frequency || '—')}</td>
-        <td>${esc(rx.duration || '—')}</td>
-        <td>${fmtDate(rx.prescribed_at || rx.created_at)}</td>
-        <td>
-          <button class="btn-icon" onclick="delPrescription(${rx.id})" title="Delete"><i class="fas fa-trash"></i></button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-// ============================================
-// RENDER BILLING - STATS
-// ============================================
-function renderBillingStats() {
-  const sRev = document.getElementById('sTotalRevenue');
-  if (!sRev) return;
-  
-  const totalRevenue = invoices
-    .filter(i => i.status === 'paid')
-    .reduce((s, i) => s + (parseFloat(i.total) || 0), 0);
-  
-  const pending = invoices.filter(i => i.status === 'pending').length;
-  const paid = invoices.filter(i => i.status === 'paid').length;
-  const total = invoices.length;
-  
-  sRev.textContent = totalRevenue.toLocaleString();
-  document.getElementById('sPendingInvoices').textContent = pending;
-  document.getElementById('sPaidInvoices').textContent = paid;
-  document.getElementById('sTotalInvoices').textContent = total;
-}
-
-// ============================================
-// RENDER BILLING - INVOICES
-// ============================================
-function renderInvoices() {
-  const tb = document.getElementById('tInvoices');
-  if (!tb) return;
-  
-  if (!currentUser) {
-    tb.innerHTML = '<tr><td colspan="7" class="empty">Tafadhali ingia kwanza</td></tr>';
-    return;
-  }
-  
-  const q = (document.getElementById('searchInv').value || '').toLowerCase().trim();
-  const fStatus = document.getElementById('filterInvStatus').value;
-  const fPayment = document.getElementById('filterInvPayment').value;
-  
-  const list = invoices.filter(inv => {
-    if (q) {
-      const num = (inv.invoice_number || '').toLowerCase();
-      const pt = patients.find(p => p.id === inv.patient_id);
-      const ptName = pt ? pt.full_name.toLowerCase() : '';
-      if (!num.includes(q) && !ptName.includes(q)) return false;
-    }
-    if (fStatus && inv.status !== fStatus) return false;
-    if (fPayment && inv.payment_method !== fPayment) return false;
-    return true;
-  });
-  
-  document.getElementById('resultCountInv').textContent = `${list.length} of ${invoices.length} invoices`;
-  
-  if (list.length === 0) {
-    tb.innerHTML = '<tr><td colspan="7" class="empty">No invoices found</td></tr>';
-    return;
-  }
-  
-  tb.innerHTML = list.map(inv => {
-    const pt = patients.find(p => p.id === inv.patient_id);
-    const paymentIcons = { cash: '💵', mpesa: '📱', insurance: '🏥', card: '💳' };
-    
-    return `
-      <tr>
-        <td><strong style="color:#0284c7;">${esc(inv.invoice_number || '—')}</strong></td>
-        <td><strong>${esc(pt ? pt.full_name : '—')}</strong></td>
-        <td>${fmtDate(inv.created_at)}</td>
-        <td><strong>${parseFloat(inv.total || 0).toLocaleString()} TZS</strong></td>
-        <td>${paymentIcons[inv.payment_method] || ''} ${esc(inv.payment_method)}</td>
-        <td><span class="badge b-${inv.status}">${inv.status}</span></td>
-        <td>
-          <button class="btn-icon" onclick="viewInvoice(${inv.id})" title="View"><i class="fas fa-eye"></i></button>
-          <button class="btn-icon" onclick="delInvoice(${inv.id})" title="Delete"><i class="fas fa-trash"></i></button>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-function clearInvFilters() {
-  document.getElementById('searchInv').value = '';
-  document.getElementById('filterInvStatus').value = '';
-  document.getElementById('filterInvPayment').value = '';
-  renderInvoices();
-}
-
-// ============================================
-// PATIENT CRUD
-// ============================================
-function openPatient() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  document.getElementById('fPatient').reset();
-  document.getElementById('p_id').value = '';
-  document.getElementById('p_display_id').value = 'Auto-generated on save';
-  document.getElementById('mPatientTitle').textContent = 'Add Patient';
-  openM('mPatient');
-}
-
-function editPatient(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  const p = patients.find(x => x.id === id);
-  if (!p) return;
-  document.getElementById('p_id').value = p.id;
-  document.getElementById('p_display_id').value = padId(p.id);
-  document.getElementById('p_name').value = p.full_name || '';
-  document.getElementById('p_email').value = p.email || '';
-  document.getElementById('p_phone').value = p.phone || '';
-  document.getElementById('p_dob').value = p.dob || '';
-  document.getElementById('p_gender').value = p.gender || '';
-  document.getElementById('p_blood').value = p.blood_group || '';
-  document.getElementById('p_address').value = p.address || '';
-  document.getElementById('p_allergies').value = p.allergies || '';
-  document.getElementById('p_notes').value = p.notes || '';
-  document.getElementById('mPatientTitle').textContent = 'Edit Patient ' + padId(p.id);
-  openM('mPatient');
-}
-
-async function savePatient() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  const id = document.getElementById('p_id').value;
-  const data = {
-    full_name: document.getElementById('p_name').value.trim(),
-    email: document.getElementById('p_email').value.trim(),
-    phone: document.getElementById('p_phone').value.trim(),
-    dob: document.getElementById('p_dob').value,
-    gender: document.getElementById('p_gender').value || null,
-    blood_group: document.getElementById('p_blood').value || null,
-    address: document.getElementById('p_address').value.trim() || null,
-    allergies: document.getElementById('p_allergies').value.trim() || null,
-    notes: document.getElementById('p_notes').value.trim() || null
-  };
-  if (!data.full_name || !data.email || !data.phone || !data.dob) {
-    toast('Fill all required fields', 'error');
-    return;
-  }
-  try {
-    if (id) {
-      const { error } = await db.from('patients').update(data).eq('id', id);
-      if (error) throw error;
-      toast('Patient ' + padId(id) + ' updated');
-    } else {
-      const { data: inserted, error } = await db.from('patients').insert([data]).select();
-      if (error) throw error;
-      const newId = inserted && inserted[0] ? inserted[0].id : '?';
-      toast('Patient ' + padId(newId) + ' added');
-    }
-    closeM('mPatient');
-    loadAll();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function delPatient(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  if (!confirm('Delete this patient?')) return;
-  const { error } = await db.from('patients').delete().eq('id', id);
-  if (error) return toast(error.message, 'error');
-  toast('Patient deleted');
-  loadAll();
-}
-
-function viewPatient(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  const p = patients.find(x => x.id === id);
-  if (!p) return;
-  document.getElementById('mViewPatientTitle').textContent = 'Patient ' + padId(p.id);
-  document.getElementById('viewPatientContent').innerHTML = `
-    <div class="detail-row"><strong>Patient ID</strong><span style="color:#0284c7; font-weight:700;">${padId(p.id)}</span></div>
-    <div class="detail-row"><strong>Full Name</strong><span>${esc(p.full_name)}</span></div>
-    <div class="detail-row"><strong>Email</strong><span>${esc(p.email || '—')}</span></div>
-    <div class="detail-row"><strong>Phone</strong><span>${esc(p.phone || '—')}</span></div>
-    <div class="detail-row"><strong>Date of Birth</strong><span>${fmtDate(p.dob)}</span></div>
-    <div class="detail-row"><strong>Gender</strong><span>${esc(p.gender || '—')}</span></div>
-    <div class="detail-row"><strong>Blood Group</strong><span>${esc(p.blood_group || '—')}</span></div>
-    <div class="detail-row"><strong>Address</strong><span>${esc(p.address || '—')}</span></div>
-    <div class="detail-row"><strong>Allergies</strong><span>${esc(p.allergies || '—')}</span></div>
-    <div class="detail-row"><strong>Notes</strong><span>${esc(p.notes || '—')}</span></div>
-    <div class="detail-row"><strong>Registered</strong><span>${fmtDate(p.registered_at || p.created_at)}</span></div>
-  `;
-  openM('mViewPatient');
-}
-
-// ============================================
-// DOCTOR CRUD
-// ============================================
-function openDoctor() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  document.getElementById('fDoctor').reset();
-  document.getElementById('d_id').value = '';
-  document.getElementById('mDoctorTitle').textContent = 'Add Doctor';
-  openM('mDoctor');
-}
-
-function editDoctor(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  const d = doctors.find(x => x.id === id);
-  if (!d) return;
-  document.getElementById('d_id').value = d.id;
-  document.getElementById('d_name').value = d.full_name || '';
-  document.getElementById('d_email').value = d.email || '';
-  document.getElementById('d_phone').value = d.phone || '';
-  document.getElementById('d_spec').value = d.specialization || '';
-  document.getElementById('d_lic').value = d.license_number || '';
-  document.getElementById('d_exp').value = d.years_experience || 0;
-  document.getElementById('d_fee').value = d.consultation_fee || 0;
-  document.getElementById('mDoctorTitle').textContent = 'Edit Doctor';
-  openM('mDoctor');
-}
-
-async function saveDoctor() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  const id = document.getElementById('d_id').value;
-  const data = {
-    full_name: document.getElementById('d_name').value.trim(),
-    email: document.getElementById('d_email').value.trim(),
-    phone: document.getElementById('d_phone').value.trim(),
-    specialization: document.getElementById('d_spec').value.trim(),
-    license_number: document.getElementById('d_lic').value.trim(),
-    years_experience: parseInt(document.getElementById('d_exp').value) || 0,
-    consultation_fee: parseFloat(document.getElementById('d_fee').value) || 0
-  };
-  if (!data.full_name || !data.email || !data.phone || !data.specialization || !data.license_number) {
-    toast('Fill all required fields', 'error');
-    return;
-  }
-  try {
-    const { error } = id
-      ? await db.from('doctors').update(data).eq('id', id)
-      : await db.from('doctors').insert([data]);
-    if (error) throw error;
-    toast(id ? 'Doctor updated' : 'Doctor added');
-    closeM('mDoctor');
-    loadAll();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function delDoctor(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  if (!confirm('Delete this doctor?')) return;
-  const { error } = await db.from('doctors').delete().eq('id', id);
-  if (error) return toast(error.message, 'error');
-  toast('Doctor deleted');
-  loadAll();
-}
-
-// ============================================
-// APPOINTMENT CRUD
-// ============================================
-async function openAppt() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  document.getElementById('fAppt').reset();
-  const ps = document.getElementById('a_patient');
-  const ds = document.getElementById('a_doctor');
-  ps.innerHTML = '<option value="">— Select patient —</option>' + patients.map(p => `<option value="${p.id}">${padId(p.id)} - ${esc(p.full_name)}</option>`).join('');
-  ds.innerHTML = '<option value="">— Select doctor —</option>' + doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('');
-  const dt = new Date(Date.now() + 3600000);
-  dt.setMinutes(dt.getMinutes() - dt.getTimezoneOffset());
-  document.getElementById('a_date').value = dt.toISOString().slice(0, 16);
-  openM('mAppt');
-}
-
-async function saveAppt() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  const data = {
-    patient_id: parseInt(document.getElementById('a_patient').value),
-    doctor_id: parseInt(document.getElementById('a_doctor').value),
-    appointment_date: document.getElementById('a_date').value,
-    reason: document.getElementById('a_reason').value.trim(),
-    status: document.getElementById('a_status').value
-  };
-  if (!data.patient_id || !data.doctor_id || !data.appointment_date || !data.reason) {
-    toast('Fill all required fields', 'error');
-    return;
-  }
-  try {
-    const { error } = await db.from('appointments').insert([data]);
-    if (error) throw error;
-    toast('Appointment scheduled');
-    closeM('mAppt');
-    loadAll();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function delAppt(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  if (!confirm('Delete this appointment?')) return;
-  const { error } = await db.from('appointments').delete().eq('id', id);
-  if (error) return toast(error.message, 'error');
-  toast('Appointment deleted');
-  loadAll();
-}
-
-// ============================================
-// PRESCRIPTION CRUD
-// ============================================
-async function openPrescription() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  document.getElementById('fPrescription').reset();
-  document.getElementById('rx_id').value = '';
-  
-  const ps = document.getElementById('rx_patient');
-  const ds = document.getElementById('rx_doctor');
-  
-  ps.innerHTML = '<option value="">— Select patient —</option>' + 
-    patients.map(p => `<option value="${p.id}">${padId(p.id)} - ${esc(p.full_name)}</option>`).join('');
-  
-  ds.innerHTML = '<option value="">— Select doctor —</option>' + 
-    doctors.map(d => `<option value="${d.id}">${esc(d.full_name)}</option>`).join('');
-  
-  document.getElementById('mPrescriptionTitle').textContent = 'New Prescription';
-  openM('mPrescription');
-}
-
-async function savePrescription() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  
-  const data = {
-    patient_id: parseInt(document.getElementById('rx_patient').value),
-    doctor_id: parseInt(document.getElementById('rx_doctor').value),
-    medicine_name: document.getElementById('rx_medicine').value.trim(),
-    dosage: document.getElementById('rx_dosage').value.trim(),
-    frequency: document.getElementById('rx_frequency').value.trim() || null,
-    duration: document.getElementById('rx_duration').value.trim() || null,
-    instructions: document.getElementById('rx_instructions').value.trim() || null
-  };
-  
-  if (!data.patient_id || !data.doctor_id || !data.medicine_name || !data.dosage) {
-    toast('Jaza sehemu zote zinazohitajika', 'error');
-    return;
-  }
-  
-  try {
-    const { error } = await db.from('prescriptions').insert([data]);
-    if (error) throw error;
-    toast('✅ Prescription imeongezwa');
-    closeM('mPrescription');
-    loadAll();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function delPrescription(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  if (!confirm('Delete this prescription?')) return;
-  const { error } = await db.from('prescriptions').delete().eq('id', id);
-  if (error) return toast(error.message, 'error');
-  toast('Prescription deleted');
-  loadAll();
-}
-
-// ============================================
-// INVOICE CRUD
-// ============================================
-async function openInvoice() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  
-  document.getElementById('fInvoice').reset();
-  document.getElementById('inv_id').value = '';
-  
-  const ps = document.getElementById('inv_patient');
-  ps.innerHTML = '<option value="">— Select patient —</option>' + 
-    patients.map(p => `<option value="${p.id}">${padId(p.id)} - ${esc(p.full_name)}</option>`).join('');
-  
-  editingInvoiceItems = [];
-  addInvoiceItem();
-  
-  document.getElementById('mInvoiceTitle').textContent = 'New Invoice';
-  openM('mInvoice');
-}
-
-function addInvoiceItem() {
-  editingInvoiceItems.push({
-    description: '',
-    quantity: 1,
-    unit_price: 0
-  });
-  renderInvoiceItems();
-}
-
-function removeInvoiceItem(index) {
-  editingInvoiceItems.splice(index, 1);
-  if (editingInvoiceItems.length === 0) addInvoiceItem();
-  renderInvoiceItems();
-}
-
-function renderInvoiceItems() {
-  const container = document.getElementById('invoiceItems');
-  if (!container) return;
-  
-  container.innerHTML = editingInvoiceItems.map((item, i) => `
-    <div style="background:var(--gray-50); padding:0.85rem; border-radius:10px; margin-bottom:0.6rem; display:grid; grid-template-columns:2fr 0.6fr 1fr 1fr auto; gap:0.6rem; align-items:end;">
-      <div class="fg" style="gap:0.3rem;">
-        <label style="font-size:0.7rem;">Description</label>
-        <input type="text" value="${esc(item.description)}" oninput="updateInvoiceItem(${i}, 'description', this.value)" placeholder="e.g., Consultation" style="padding:0.5rem 0.7rem;">
+  <!-- MODAL: AUTH -->
+  <div class="modal-bg" id="mAuth">
+    <div class="modal" style="max-width:450px;">
+      <div class="modal-head">
+        <h3 id="authTitle">Sign In</h3>
+        <button class="close-x" onclick="closeM('mAuth')">&times;</button>
       </div>
-      <div class="fg" style="gap:0.3rem;">
-        <label style="font-size:0.7rem;">Qty</label>
-        <input type="number" value="${item.quantity}" min="1" oninput="updateInvoiceItem(${i}, 'quantity', this.value)" style="padding:0.5rem 0.7rem;">
-      </div>
-      <div class="fg" style="gap:0.3rem;">
-        <label style="font-size:0.7rem;">Unit Price</label>
-        <input type="number" value="${item.unit_price}" min="0" oninput="updateInvoiceItem(${i}, 'unit_price', this.value)" style="padding:0.5rem 0.7rem;">
-      </div>
-      <div class="fg" style="gap:0.3rem;">
-        <label style="font-size:0.7rem;">Amount</label>
-        <input type="text" value="${(item.quantity * item.unit_price).toLocaleString()}" readonly style="padding:0.5rem 0.7rem; background:white;">
-      </div>
-      <button type="button" class="btn-icon" onclick="removeInvoiceItem(${i})" title="Remove" style="margin-bottom:2px;">
-        <i class="fas fa-trash" style="color:var(--danger);"></i>
-      </button>
-    </div>
-  `).join('');
-  
-  calculateInvoiceTotal();
-}
 
-function updateInvoiceItem(index, field, value) {
-  if (!editingInvoiceItems[index]) return;
-  if (field === 'description') {
-    editingInvoiceItems[index][field] = value;
-  } else {
-    editingInvoiceItems[index][field] = parseFloat(value) || 0;
-  }
-  if (field !== 'description') renderInvoiceItems();
-}
-
-function calculateInvoiceTotal() {
-  const subtotal = editingInvoiceItems.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
-  const taxPercent = parseFloat(document.getElementById('inv_tax_percent').value) || 0;
-  const discount = parseFloat(document.getElementById('inv_discount').value) || 0;
-  const tax = subtotal * (taxPercent / 100);
-  const total = subtotal + tax - discount;
-  
-  document.getElementById('inv_subtotal').value = subtotal;
-  document.getElementById('inv_total_display').value = total.toLocaleString() + ' TZS';
-}
-
-async function saveInvoice() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  
-  const patient_id = parseInt(document.getElementById('inv_patient').value);
-  if (!patient_id) { toast('Chagua mgonjwa', 'error'); return; }
-  
-  const validItems = editingInvoiceItems.filter(i => i.description.trim() && i.quantity > 0);
-  if (validItems.length === 0) { toast('Ongeza items angalau moja', 'error'); return; }
-  
-  const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
-  const taxPercent = parseFloat(document.getElementById('inv_tax_percent').value) || 0;
-  const discount = parseFloat(document.getElementById('inv_discount').value) || 0;
-  const tax = subtotal * (taxPercent / 100);
-  const total = subtotal + tax - discount;
-  
-  const invoiceNumber = 'INV-' + Date.now().toString().slice(-8);
-  
-  const invoiceData = {
-    invoice_number: invoiceNumber,
-    patient_id: patient_id,
-    subtotal: subtotal,
-    tax: tax,
-    discount: discount,
-    total: total,
-    payment_method: document.getElementById('inv_payment').value,
-    status: document.getElementById('inv_status').value,
-    notes: document.getElementById('inv_notes').value.trim() || null
-  };
-  
-  try {
-    const { data: inserted, error: invErr } = await db
-      .from('invoices')
-      .insert([invoiceData])
-      .select();
-    if (invErr) throw invErr;
-    
-    const invoiceId = inserted[0].id;
-    
-    const items = validItems.map(i => ({
-      invoice_id: invoiceId,
-      description: i.description,
-      quantity: i.quantity,
-      unit_price: i.unit_price,
-      amount: i.quantity * i.unit_price
-    }));
-    
-    const { error: itemsErr } = await db.from('invoice_items').insert(items);
-    if (itemsErr) throw itemsErr;
-    
-    toast('✅ Invoice ' + invoiceNumber + ' imeundwa');
-    closeM('mInvoice');
-    loadAll();
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
-
-async function viewInvoice(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  
-  const inv = invoices.find(x => x.id === id);
-  if (!inv) return;
-  
-  const pt = patients.find(p => p.id === inv.patient_id);
-  
-  const { data: items } = await db
-    .from('invoice_items')
-    .select('*')
-    .eq('invoice_id', id);
-  
-  const paymentIcons = { cash: '💵 Cash', mpesa: '📱 M-Pesa', insurance: '🏥 Insurance', card: '💳 Card' };
-  
-  document.getElementById('mViewInvoiceTitle').textContent = 'Invoice ' + (inv.invoice_number || '');
-  document.getElementById('viewInvoiceContent').innerHTML = `
-    <div style="text-align:center; padding-bottom:1rem; border-bottom:2px solid var(--gray-200); margin-bottom:1.5rem;">
-      <h2 style="font-size:1.3rem; color:var(--primary);">🏥 MediCare Hospital</h2>
-      <p style="color:var(--gray-500); font-size:0.85rem;">Dar es Salaam, Tanzania</p>
-    </div>
-    
-    <div class="detail-row"><strong>Invoice #</strong><span><strong>${esc(inv.invoice_number)}</strong></span></div>
-    <div class="detail-row"><strong>Date</strong><span>${fmtDate(inv.created_at)}</span></div>
-    <div class="detail-row"><strong>Patient</strong><span>${esc(pt ? pt.full_name : '—')}</span></div>
-    <div class="detail-row"><strong>Phone</strong><span>${esc(pt ? pt.phone : '—')}</span></div>
-    <div class="detail-row"><strong>Payment</strong><span>${paymentIcons[inv.payment_method] || inv.payment_method}</span></div>
-    <div class="detail-row"><strong>Status</strong><span><span class="badge b-${inv.status}">${inv.status}</span></span></div>
-    
-    <h4 style="margin:1.5rem 0 0.75rem;">Items</h4>
-    <table style="font-size:0.85rem;">
-      <thead>
-        <tr><th>Description</th><th>Qty</th><th>Price</th><th>Amount</th></tr>
-      </thead>
-      <tbody>
-        ${(items || []).map(i => `
-          <tr>
-            <td>${esc(i.description)}</td>
-            <td>${i.quantity}</td>
-            <td>${parseFloat(i.unit_price).toLocaleString()}</td>
-            <td><strong>${parseFloat(i.amount).toLocaleString()}</strong></td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
-    
-    <div style="margin-top:1.5rem; padding:1rem; background:var(--gray-50); border-radius:10px;">
-      <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
-        <span>Subtotal:</span><span>${parseFloat(inv.subtotal).toLocaleString()} TZS</span>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabSignIn" onclick="switchAuthTab('signin')">Sign In</button>
+        <button class="auth-tab" id="tabSignUp" onclick="switchAuthTab('signup')">Sign Up</button>
       </div>
-      <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
-        <span>Tax:</span><span>${parseFloat(inv.tax).toLocaleString()} TZS</span>
-      </div>
-      <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem;">
-        <span>Discount:</span><span>-${parseFloat(inv.discount).toLocaleString()} TZS</span>
-      </div>
-      <div style="display:flex; justify-content:space-between; font-weight:800; font-size:1.1rem; padding-top:0.6rem; border-top:2px solid var(--gray-200); color:var(--primary);">
-        <span>TOTAL:</span><span>${parseFloat(inv.total).toLocaleString()} TZS</span>
+
+      <form id="fAuth">
+        <div class="fgrid">
+          <div class="fg full" id="signupNameField" style="display:none;">
+            <label>Full Name *</label>
+            <input type="text" id="a_name">
+          </div>
+          <div class="fg full">
+            <label>Email *</label>
+            <input type="email" id="a_email" required>
+          </div>
+          <div class="fg full">
+            <label>Password *</label>
+            <input type="password" id="a_password" placeholder="At least 6 characters" required>
+          </div>
+          <div class="fg full" id="signupRoleField" style="display:none;">
+            <label>Role *</label>
+            <select id="a_role">
+              <option value="receptionist">Receptionist</option>
+              <option value="nurse">Nurse</option>
+              <option value="doctor">Doctor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+      </form>
+
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mAuth')">Cancel</button>
+        <button class="btn btn-primary" id="authSubmitBtn" onclick="submitAuth()">
+          <i class="fas fa-sign-in-alt"></i> Sign In
+        </button>
       </div>
     </div>
-    
-    ${inv.notes ? `<p style="margin-top:1rem; color:var(--gray-500); font-size:0.85rem;"><strong>Notes:</strong> ${esc(inv.notes)}</p>` : ''}
-  `;
-  
-  openM('mViewInvoice');
-}
+  </div>
 
-async function delInvoice(id) {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  if (!confirm('Delete this invoice?')) return;
-  const { error } = await db.from('invoices').delete().eq('id', id);
-  if (error) return toast(error.message, 'error');
-  toast('Invoice deleted');
-  loadAll();
-}
+  <!-- MODAL: PATIENT -->
+  <div class="modal-bg" id="mPatient">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="mPatientTitle">Add Patient</h3>
+        <button class="close-x" onclick="closeM('mPatient')">&times;</button>
+      </div>
+      <form id="fPatient">
+        <input type="hidden" id="p_id">
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Patient ID</label>
+            <input type="text" id="p_display_id" readonly placeholder="Auto-generated on save">
+          </div>
+          <div class="fg full"><label>Full Name *</label><input type="text" id="p_name" required></div>
+          <div class="fg"><label>Email *</label><input type="email" id="p_email" required></div>
+          <div class="fg"><label>Phone *</label><input type="tel" id="p_phone" required></div>
+          <div class="fg"><label>Date of Birth *</label><input type="date" id="p_dob" required></div>
+          <div class="fg"><label>Gender</label><select id="p_gender"><option value="">Select</option><option value="male">Male</option><option value="female">Female</option><option value="other">Other</option></select></div>
+          <div class="fg"><label>Blood Group</label><select id="p_blood"><option value="">Select</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>
+          <div class="fg full"><label>Address</label><input type="text" id="p_address"></div>
+          <div class="fg full"><label>Allergies</label><input type="text" id="p_allergies"></div>
+          <div class="fg full"><label>Notes</label><textarea id="p_notes" placeholder="Maelezo ya ziada ya mgonjwa..."></textarea></div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mPatient')">Cancel</button>
+        <button class="btn btn-primary" onclick="savePatient()"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
 
-// ============================================
-// EXPORT CSV
-// ============================================
-function exportPatientsCSV() {
-  if (!currentUser) { toast('Tafadhali ingia kwanza', 'error'); return; }
-  if (patients.length === 0) {
-    toast('No patients to export', 'error');
-    return;
-  }
-  const headers = ['ID', 'Full Name', 'Email', 'Phone', 'DOB', 'Gender', 'Blood Group', 'Address', 'Allergies', 'Notes', 'Registered'];
-  const rows = patients.map(p => [
-    padId(p.id),
-    p.full_name || '',
-    p.email || '',
-    p.phone || '',
-    p.dob || '',
-    p.gender || '',
-    p.blood_group || '',
-    p.address || '',
-    p.allergies || '',
-    p.notes || '',
-    fmtDate(p.registered_at || p.created_at)
-  ]);
-  const csv = [headers, ...rows]
-    .map(row => row.map(cell => '"' + String(cell).replace(/"/g, '""') + '"').join(','))
-    .join('\n');
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = 'patients_' + new Date().toISOString().slice(0, 10) + '.csv';
-  link.click();
-  toast('CSV exported successfully');
-}
+  <!-- MODAL: VIEW PATIENT -->
+  <div class="modal-bg" id="mViewPatient">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="mViewPatientTitle">Patient Details</h3>
+        <button class="close-x" onclick="closeM('mViewPatient')">&times;</button>
+      </div>
+      <div id="viewPatientContent"></div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mViewPatient')">Close</button>
+      </div>
+    </div>
+  </div>
 
-// ============================================
-// INIT
-// ============================================
-initAuth();
+  <!-- MODAL: DOCTOR -->
+  <div class="modal-bg" id="mDoctor">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="mDoctorTitle">Add Doctor</h3>
+        <button class="close-x" onclick="closeM('mDoctor')">&times;</button>
+      </div>
+      <form id="fDoctor">
+        <input type="hidden" id="d_id">
+        <div class="fgrid">
+          <div class="fg full"><label>Full Name *</label><input type="text" id="d_name" required></div>
+          <div class="fg"><label>Email *</label><input type="email" id="d_email" required></div>
+          <div class="fg"><label>Phone *</label><input type="tel" id="d_phone" required></div>
+          <div class="fg"><label>Specialization *</label><input type="text" id="d_spec" required></div>
+          <div class="fg"><label>License Number *</label><input type="text" id="d_lic" required></div>
+          <div class="fg"><label>Years Experience</label><input type="number" id="d_exp" min="0" value="0"></div>
+          <div class="fg"><label>Consultation Fee (TZS)</label><input type="number" id="d_fee" min="0" value="0"></div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mDoctor')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveDoctor()"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: APPOINTMENT -->
+  <div class="modal-bg" id="mAppt">
+    <div class="modal">
+      <div class="modal-head">
+        <h3>New Appointment</h3>
+        <button class="close-x" onclick="closeM('mAppt')">&times;</button>
+      </div>
+      <form id="fAppt">
+        <div class="fgrid">
+          <div class="fg"><label>Patient *</label><select id="a_patient" required></select></div>
+          <div class="fg"><label>Doctor *</label><select id="a_doctor" required></select></div>
+          <div class="fg full"><label>Date & Time *</label><input type="datetime-local" id="a_date" required></div>
+          <div class="fg full"><label>Reason *</label><input type="text" id="a_reason" required></div>
+          <div class="fg full"><label>Status</label><select id="a_status"><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mAppt')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveAppt()"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PRESCRIPTION -->
+  <div class="modal-bg" id="mPrescription">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="mPrescriptionTitle">New Prescription</h3>
+        <button class="close-x" onclick="closeM('mPrescription')">&times;</button>
+      </div>
+      <form id="fPrescription">
+        <input type="hidden" id="rx_id">
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Patient *</label>
+            <select id="rx_patient" required></select>
+          </div>
+          <div class="fg full">
+            <label>Doctor *</label>
+            <select id="rx_doctor" required></select>
+          </div>
+          <div class="fg full">
+            <label>Medicine Name *</label>
+            <input type="text" id="rx_medicine" placeholder="e.g., Paracetamol 500mg" required>
+          </div>
+          <div class="fg">
+            <label>Dosage *</label>
+            <input type="text" id="rx_dosage" placeholder="e.g., 1 tablet" required>
+          </div>
+          <div class="fg">
+            <label>Frequency</label>
+            <input type="text" id="rx_frequency" placeholder="e.g., 3x daily">
+          </div>
+          <div class="fg">
+            <label>Duration</label>
+            <input type="text" id="rx_duration" placeholder="e.g., 7 days">
+          </div>
+          <div class="fg full">
+            <label>Instructions</label>
+            <textarea id="rx_instructions" placeholder="e.g., Take after meals..."></textarea>
+          </div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mPrescription')">Cancel</button>
+        <button class="btn btn-primary" onclick="savePrescription()"><i class="fas fa-save"></i> Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: INVOICE -->
+  <div class="modal-bg" id="mInvoice">
+    <div class="modal" style="max-width:750px;">
+      <div class="modal-head">
+        <h3 id="mInvoiceTitle">New Invoice</h3>
+        <button class="close-x" onclick="closeM('mInvoice')">&times;</button>
+      </div>
+      <form id="fInvoice">
+        <input type="hidden" id="inv_id">
+        
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Patient *</label>
+            <select id="inv_patient" required></select>
+          </div>
+          <div class="fg">
+            <label>Payment Method</label>
+            <select id="inv_payment">
+              <option value="cash">💵 Cash</option>
+              <option value="mpesa">📱 M-Pesa</option>
+              <option value="insurance">🏥 Insurance</option>
+              <option value="card">💳 Card</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Status</label>
+            <select id="inv_status">
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+
+        <hr style="margin:1.5rem 0; border:none; border-top:1px solid var(--gray-200);">
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+          <h4 style="font-size:1rem; font-weight:700;">Items</h4>
+          <button type="button" class="btn btn-outline btn-sm" onclick="addInvoiceItem()">
+            <i class="fas fa-plus"></i> Add Item
+          </button>
+        </div>
+
+        <div id="invoiceItems" style="margin-bottom:1.5rem;"></div>
+
+        <div style="background:var(--gray-50); padding:1rem; border-radius:10px;">
+          <div class="fgrid">
+            <div class="fg">
+              <label>Subtotal (TZS)</label>
+              <input type="number" id="inv_subtotal" readonly value="0">
+            </div>
+            <div class="fg">
+              <label>Tax (%)</label>
+              <input type="number" id="inv_tax_percent" min="0" max="100" value="0" oninput="calculateInvoiceTotal()">
+            </div>
+            <div class="fg">
+              <label>Discount (TZS)</label>
+              <input type="number" id="inv_discount" min="0" value="0" oninput="calculateInvoiceTotal()">
+            </div>
+            <div class="fg">
+              <label style="color:var(--primary); font-weight:800;">TOTAL (TZS)</label>
+              <input type="text" id="inv_total_display" readonly value="0 TZS" style="color:var(--primary); font-weight:800; background:white; font-size:1.05rem;">
+            </div>
+          </div>
+        </div>
+
+        <div class="fg full" style="margin-top:1rem;">
+          <label>Notes</label>
+          <textarea id="inv_notes" placeholder="Maelezo ya ziada..."></textarea>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mInvoice')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveInvoice()"><i class="fas fa-save"></i> Save Invoice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: VIEW INVOICE -->
+  <div class="modal-bg" id="mViewInvoice">
+    <div class="modal" style="max-width:650px;">
+      <div class="modal-head">
+        <h3 id="mViewInvoiceTitle">Invoice Details</h3>
+        <button class="close-x" onclick="closeM('mViewInvoice')">&times;</button>
+      </div>
+      <div id="viewInvoiceContent"></div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mViewInvoice')">Close</button>
+        <button class="btn btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT INVOICE -->
+  <div class="modal-bg" id="mEditInvoice">
+    <div class="modal" style="max-width:500px;">
+      <div class="modal-head">
+        <h3 id="mEditInvoiceTitle">Edit Invoice</h3>
+        <button class="close-x" onclick="closeM('mEditInvoice')">&times;</button>
+      </div>
+      <form id="fEditInvoice">
+        <input type="hidden" id="edit_inv_id">
+        
+        <div class="fgrid">
+          <div class="fg full">
+            <label>Invoice #</label>
+            <input type="text" id="edit_inv_number" readonly>
+          </div>
+          <div class="fg full">
+            <label>Patient</label>
+            <input type="text" id="edit_inv_patient" readonly>
+          </div>
+          <div class="fg full">
+            <label>Total Amount</label>
+            <input type="text" id="edit_inv_total" readonly style="color:var(--primary); font-weight:800;">
+          </div>
+          <div class="fg">
+            <label>Payment Method</label>
+            <select id="edit_inv_payment">
+              <option value="cash">💵 Cash</option>
+              <option value="mpesa">📱 M-Pesa</option>
+              <option value="insurance">🏥 Insurance</option>
+              <option value="card">💳 Card</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Status</label>
+            <select id="edit_inv_status">
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="partial">Partial</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+          <div class="fg full">
+            <label>Notes</label>
+            <textarea id="edit_inv_notes" placeholder="Maelezo ya ziada..."></textarea>
+          </div>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-outline" onclick="closeM('mEditInvoice')">Cancel</button>
+        <button class="btn btn-primary" onclick="updateInvoice()"><i class="fas fa-save"></i> Update Invoice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript -->
+  <script src="hospital.js"></script>
+</body>
+</html>
